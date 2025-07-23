@@ -1,14 +1,19 @@
 from flask import Blueprint, request, jsonify, current_app as app
-from pymongo.errors import ConnectionFailure, OperationFailure
+from pymongo.errors import ConnectionFailure
 import time
 
 chatbot_bp = Blueprint('chatbot', __name__)
 
+# ✅ 이미지 관련 요청 판단 함수
+def wants_image(user_message: str) -> bool:
+    keywords = ["사진", "이미지", "보여", "그려", "그림", "사진 보여", "보여줘", "보여줄 수"]
+    return any(kw in user_message for kw in keywords)
+
 @chatbot_bp.route('/chatbot', methods=['POST'])
 def chatbot_reply():
     start_time = time.time()
-    user_message = "알 수 없는 메시지" # 로그를 위해 초기화
-    patient_id = "알 수 없는 ID"     # 로그를 위해 초기화
+    user_message = "알 수 없는 메시지"
+    patient_id = "알 수 없는 ID"
 
     try:
         data = request.json
@@ -18,81 +23,124 @@ def chatbot_reply():
         app.logger.info(f"[💬 챗봇 요청] 사용자 메시지: '{user_message}', 환자 ID: '{patient_id}'")
         print(f"[💬 챗봇 요청] 사용자 메시지: '{user_message}', 환자 ID: '{patient_id}'")
 
-        # ✅ MongoDB에서 환자 진료 기록 조회 시도
         mongo_client = app.extensions.get("mongo_client")
         if not mongo_client:
             app.logger.error("[❌ MongoDB] mongo_client가 앱 익스텐션에 없습니다.")
-            print("[❌ MongoDB] mongo_client가 앱 익스텐션에 없습니다.")
-            return jsonify({'response': '서버 오류: 데이터베이스 클라이언트가 초기화되지 않았습니다.', 'elapsed_time': round(time.time() - start_time, 2)}), 500
+            return jsonify({
+                'response': '서버 오류: DB 클라이언트가 초기화되지 않았습니다.',
+                'elapsed_time': round(time.time() - start_time, 2)
+            }), 500
 
         try:
             db_collection = mongo_client.get_collection("inference_results")
-            # MongoDB 연결 자체를 확인 (여기서는 클라이언트 초기화 시 확인했으므로 생략 가능하나, 추가적인 안정성을 위해 포함)
-            # db_collection.find_one({}) # 간단한 쿼리로 연결 확인
         except ConnectionFailure as e:
             app.logger.error(f"[❌ MongoDB] MongoDB 연결 실패: {e}")
-            print(f"[❌ MongoDB] MongoDB 연결 실패: {e}")
-            return jsonify({'response': '데이터베이스 연결에 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.', 'elapsed_time': round(time.time() - start_time, 2)}), 500
-        except Exception as e:
-            app.logger.error(f"[❌ MongoDB] MongoDB 컬렉션 접근 중 알 수 없는 오류: {e}")
-            print(f"[❌ MongoDB] MongoDB 컬렉션 접근 중 알 수 없는 오류: {e}")
-            return jsonify({'response': '데이터베이스 접근 중 알 수 없는 오류가 발생했습니다.', 'elapsed_time': round(time.time() - start_time, 2)}), 500
+            return jsonify({
+                'response': '데이터베이스 연결에 문제가 발생했습니다.',
+                'elapsed_time': round(time.time() - start_time, 2)
+            }), 500
 
-        # 여기서 patient_id가 문자열이 아닌 경우를 대비하여 명시적으로 문자열로 변환
         query_patient_id = str(patient_id)
-        record = db_collection.find_one({"user_id": query_patient_id})
+        records = list(db_collection.find({"user_id": query_patient_id}))
+        diagnosis_count = len(records)
 
-        record_status_log = ""
-        if record:
-            record_text = f"환자 기록: {record}"
-            record_status_log = "✅ 환자 기록을 DB에서 찾았습니다."
+        def summarize_record(r, index):
+            ts = r.get('timestamp')
+            date_str = ts.strftime('%Y-%m-%d %H:%M') if ts else '날짜 없음'
+            label1 = r.get('model1_inference_result', {}).get('label', '없음')
+            label2 = r.get('model2_inference_result', {}).get('label', '없음')
+            label3 = r.get('model3_inference_result', {}).get('tooth_number_fdi', '없음')
+            return f"- 기록 {index+1} ({date_str}) → 질병: {label1}, 위생: {label2}, 치아번호: {label3}"
+
+        if diagnosis_count > 0:
+            summaries = "\n".join([summarize_record(r, i) for i, r in enumerate(records)])
+            record_summary = f"총 {diagnosis_count}건의 진단 기록 요약:\n{summaries}"
+            record_status_log = f"✅ 진단 기록 {diagnosis_count}건 조회됨"
         else:
-            record_text = "환자 기록 없음"
-            record_status_log = "ℹ️ 해당 환자 ID로 DB에서 기록을 찾지 못했습니다."
-            if patient_id == 'ID 없음': # patient_id가 제대로 넘어오지 않은 경우
-                record_status_log += " (환자 ID가 제대로 전달되지 않았을 수 있습니다.)"
+            record_summary = "진단 기록 없음"
+            record_status_log = "ℹ️ 진단 기록 없음"
 
-        app.logger.info(f"[🔍 DB 조회 결과] {record_status_log} 조회된 기록: {record}")
-        print(f"[🔍 DB 조회 결과] {record_status_log} 조회된 기록: {record}")
+        app.logger.info(f"[🔍 DB 조회 결과] {record_status_log}")
+        print(f"[🔍 DB 조회 결과] {record_status_log}")
 
-
-        # ✅ 이미 초기화된 Gemini 모델 사용
         gemini_model = app.extensions.get("gemini_model")
         if not gemini_model:
             app.logger.error("[❌ Gemini] Gemini 모델이 앱 익스텐션에 없습니다.")
-            print("[❌ Gemini] Gemini 모델이 앱 익스텐션에 없습니다.")
-            return jsonify({'response': '서버 오류: AI 모델이 초기화되지 않았습니다.', 'elapsed_time': round(time.time() - start_time, 2)}), 500
+            return jsonify({
+                'response': '서버 오류: AI 모델이 초기화되지 않았습니다.',
+                'elapsed_time': round(time.time() - start_time, 2)
+            }), 500
 
         chat = gemini_model.start_chat()
 
         prompt = f"""
-        환자 기록은 다음과 같습니다:\n{record_text}\n\n
-        환자가 다음과 같은 질문을 했습니다:\n"{user_message}"\n
-        이에 대해 친절하게 설명해주세요.
+        환자 ID '{query_patient_id}'는 지금까지 총 {diagnosis_count}건의 사진 진단 기록이 있습니다.
+
+        {record_summary}
+
+        사용자 질문:
+        "{user_message}"
+
+        위 내용을 참고하여 의료 기록 기반으로 정확하고 친절하게 답변해주세요.
         """
-        app.logger.info(f"[🤖 Gemini 요청] Gemini 모델에 전달될 프롬프트:\n{prompt[:500]}...") # 프롬프트 일부만 로깅
-        print(f"[🤖 Gemini 요청] Gemini 모델에 전달될 프롬프트:\n{prompt[:500]}...")
+        app.logger.info(f"[🤖 Gemini 요청] 프롬프트 일부:\n{prompt[:500]}...")
+        print(f"[🤖 Gemini 요청] 프롬프트 일부:\n{prompt[:500]}...")
 
         try:
             response = chat.send_message(prompt)
             reply = response.text
-            app.logger.info(f"[✅ Gemini 응답] Gemini 모델로부터 응답 받음. 내용 길이: {len(reply)} 문자")
-            print(f"[✅ Gemini 응답] Gemini 모델로부터 응답 받음. 내용 길이: {len(reply)} 문자")
-            app.logger.info(f"[✅ Gemini 응답] Gemini 모델의 실제 응답:\n{reply[:500]}...") # 응답 일부만 로깅
-            print(f"[✅ Gemini 응답] Gemini 모델의 실제 응답:\n{reply[:500]}...")
-
+            app.logger.info(f"[✅ Gemini 응답] 길이: {len(reply)}자 / 내용:\n{reply[:500]}...")
+            print(f"[✅ Gemini 응답] 길이: {len(reply)}자 / 내용:\n{reply[:500]}...")
         except Exception as e:
-            app.logger.error(f"[❌ Gemini] Gemini 모델 응답 생성 중 오류 발생: {e}")
-            print(f"[❌ Gemini] Gemini 모델 응답 생성 중 오류 발생: {e}")
-            reply = "AI 모델 응답 생성 중 문제가 발생했습니다. 다시 시도해 주세요."
+            app.logger.error(f"[❌ Gemini 오류] 응답 생성 실패: {e}")
+            print(f"[❌ Gemini 오류] 응답 생성 실패: {e}")
+            reply = "AI 응답 생성 중 오류가 발생했습니다. 다시 시도해 주세요."
+
+        # ✅ 이미지 조건부 반환
+        image_urls = {}
+
+        if diagnosis_count > 0 and wants_image(user_message):
+            # ✅ "N번째 기록" 요청
+            import re
+            nth_match = re.search(r'(\d+)[번째\s]*기록', user_message)
+            if nth_match:
+                n = int(nth_match.group(1))
+                if 1 <= n <= diagnosis_count:
+                    selected_record = records[n - 1]
+                else:
+                    reply += f"\n\n⚠️ 총 {diagnosis_count}개의 기록 중 {n}번째 기록은 존재하지 않습니다."
+                    selected_record = None
+            elif "가장 오래된" in user_message:
+                selected_record = records[0]
+            elif "가장 최근" in user_message:
+                selected_record = records[-1]
+            else:
+                # 📛 그 외 다중 요청 → 안내만 하고 사진은 보내지 않음
+                reply += "\n\n⚠️ 진단 기록이 여러 건 존재합니다. 특정 기록을 확인하시려면 '가장 오래된 기록', '3번째 기록'과 같이 지정해주세요.\n\n또는 '이전 결과 보기' 화면에서 확인하실 수 있습니다."
+                selected_record = None
+
+            # ✅ URL 변환
+            def to_url(path):
+                return f"http://192.168.0.19:5000{path}" if path else None
+
+            if selected_record:
+                image_urls = {
+                    k: to_url(selected_record.get(f"{k}_image_path"))
+                    for k in ["original", "model1", "model2", "model3"]
+                }
+                image_urls = {k: v for k, v in image_urls.items() if v}
 
         elapsed_time = round(time.time() - start_time, 2)
-        app.logger.info(f"[⏱️ 챗봇 응답] 총 응답 시간: {elapsed_time}초")
-        print(f"[⏱️ 챗봇 응답] 총 응답 시간: {elapsed_time}초")
-
-        return jsonify({'response': reply, 'elapsed_time': elapsed_time})
+        app.logger.info(f"[⏱️ 응답 시간] {elapsed_time}초")
+        return jsonify({
+            'response': reply,
+            'image_urls': image_urls,
+            'elapsed_time': elapsed_time
+        })
 
     except Exception as e:
-        app.logger.error(f"[❌ 챗봇 오류] 챗봇 처리 중 예외 발생 (사용자 메시지: '{user_message}', 환자 ID: '{patient_id}'): {e}", exc_info=True)
-        print(f"[❌ 챗봇 오류] 챗봇 처리 중 예외 발생 (사용자 메시지: '{user_message}', 환자 ID: '{patient_id}'): {e}")
-        return jsonify({'response': '챗봇 시스템에 일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.', 'elapsed_time': round(time.time() - start_time, 2)}), 500
+        app.logger.error(f"[❌ 챗봇 오류] 예외 발생: {e}", exc_info=True)
+        return jsonify({
+            'response': '시스템 오류가 발생했습니다.',
+            'elapsed_time': round(time.time() - start_time, 2)
+        }), 500
