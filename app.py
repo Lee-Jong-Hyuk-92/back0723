@@ -11,20 +11,21 @@ from vertexai.preview.generative_models import GenerativeModel, Part, Image as V
 import google.generativeai as genai
 from dotenv import load_dotenv
 
-# ✅ Blueprint 라우트 임포트
-from routes.auth_routes import auth_bp
-from routes.image_routes import image_bp
-from routes.upload_routes import upload_bp
-from routes.inference_routes import inference_bp
-from routes.static_routes import static_bp
-from routes.application_routes import application_bp
-from routes.consult_routes import consult_bp
-from routes.chatbot_routes import chatbot_bp
-from routes.chatbot_routes_medgemma import chatbot_med_bp
-from routes.multimodal_gemini_route import multimodal_gemini_bp  # ✅ 추가
+# ✅ JWT
+from flask_jwt_extended import JWTManager
+
+# ✅ Flask 앱 생성 및 설정
+app = Flask(__name__)
+app.config.from_object(DevelopmentConfig)
+CORS(app)
 
 # ✅ .env 설정 로드
 load_dotenv()
+
+# ✅ JWT 설정
+app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'super-secret-key')  # .env에 꼭 넣기
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = 3600  # 초 단위 (1시간)
+jwt = JWTManager(app)
 
 # ✅ GCP 서비스 계정 키 설정
 CREDENTIALS_FILE_NAME = "gcp_credentials.json"
@@ -61,11 +62,6 @@ try:
 except Exception as e:
     raise ValueError(f"Gemini 모델 로드 실패: {e}")
 
-# ✅ Flask 앱 생성 및 설정
-app = Flask(__name__)
-app.config.from_object(DevelopmentConfig)
-CORS(app)
-
 print(f"✅ 연결된 DB URI: {app.config['SQLALCHEMY_DATABASE_URI']}")
 
 # ✅ 폴더 생성
@@ -95,6 +91,17 @@ with app.app_context():
     db.create_all()
 
 # ✅ 라우트 등록
+from routes.auth_routes import auth_bp
+from routes.image_routes import image_bp
+from routes.upload_routes import upload_bp
+from routes.inference_routes import inference_bp
+from routes.static_routes import static_bp
+from routes.application_routes import application_bp
+from routes.consult_routes import consult_bp
+from routes.chatbot_routes import chatbot_bp
+from routes.chatbot_routes_medgemma import chatbot_med_bp
+from routes.multimodal_gemini_route import multimodal_gemini_bp
+
 app.register_blueprint(auth_bp, url_prefix='/api/auth')
 app.register_blueprint(image_bp)
 app.register_blueprint(upload_bp, url_prefix='/api')
@@ -104,7 +111,7 @@ app.register_blueprint(application_bp, url_prefix='/api')
 app.register_blueprint(consult_bp, url_prefix='/api/consult')
 app.register_blueprint(chatbot_bp, url_prefix='/api')
 app.register_blueprint(chatbot_med_bp, url_prefix='/api')
-app.register_blueprint(multimodal_gemini_bp, url_prefix='/api')  # ✅ 추가
+app.register_blueprint(multimodal_gemini_bp, url_prefix='/api')
 
 # ✅ 기본 라우트
 @app.route('/')

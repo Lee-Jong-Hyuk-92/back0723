@@ -1,6 +1,7 @@
 import bcrypt
 from flask import Blueprint, request, jsonify
 from models.model import db, User, Doctor
+from flask_jwt_extended import create_access_token
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -84,10 +85,20 @@ def login():
             "role": user.role
         }
         user_data["doctor_id" if role == 'D' else "user_id"] = getattr(user, "doctor_id" if role == 'D' else "user_id")
-        return jsonify({"message": "Login successful", "user": user_data}), 200
+
+        # ✅ JWT 토큰 생성
+        access_token = create_access_token(identity={
+            "register_id": user.register_id,
+            "role": user.role
+        })
+
+        return jsonify({
+            "message": "Login successful",
+            "access_token": access_token,
+            "user": user_data
+        }), 200
 
     return jsonify({"message": "Invalid credentials"}), 401
-
 
 # ✅ 회원 탈퇴
 @auth_bp.route('/delete_account', methods=['DELETE'])
