@@ -1,6 +1,22 @@
 from flask import Blueprint, request, jsonify, current_app as app
 from pymongo.errors import ConnectionFailure
 import time
+import logging
+import os
+
+# ✅ 챗봇 전용 로거 분리
+chatbot_logger = logging.getLogger("chatbot_logger")
+chatbot_logger.setLevel(logging.INFO)
+
+log_dir = os.path.join(os.path.dirname(__file__), "..", "logs")
+os.makedirs(log_dir, exist_ok=True)
+log_path = os.path.join(log_dir, "chatbot_times.log")
+
+if not chatbot_logger.handlers:
+    fh = logging.FileHandler(log_path, encoding='utf-8')
+    formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
+    fh.setFormatter(formatter)
+    chatbot_logger.addHandler(fh)
 
 chatbot_bp = Blueprint('chatbot', __name__)
 
@@ -115,11 +131,9 @@ def chatbot_reply():
             elif "가장 최근" in user_message:
                 selected_record = records[-1]
             else:
-                # 📛 그 외 다중 요청 → 안내만 하고 사진은 보내지 않음
                 reply += "\n\n⚠️ 진단 기록이 여러 건 존재합니다. 특정 기록을 확인하시려면 '가장 오래된 기록', '3번째 기록'과 같이 지정해주세요.\n\n또는 '이전 결과 보기' 화면에서 확인하실 수 있습니다."
                 selected_record = None
 
-            # ✅ URL 변환
             def to_url(path):
                 return f"http://192.168.0.19:5000{path}" if path else None
 
@@ -132,6 +146,8 @@ def chatbot_reply():
 
         elapsed_time = round(time.time() - start_time, 2)
         app.logger.info(f"[⏱️ 응답 시간] {elapsed_time}초")
+        chatbot_logger.info(f"[🤖 챗봇 응답 시간] {elapsed_time:.2f}s (user_id={patient_id}, 메시지: {user_message})")
+
         return jsonify({
             'response': reply,
             'image_urls': image_urls,

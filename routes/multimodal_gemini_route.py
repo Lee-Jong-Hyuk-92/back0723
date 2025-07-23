@@ -6,6 +6,21 @@ import requests
 from io import BytesIO
 import os
 import time
+import logging
+
+# ✅ Gemini 전용 로거 분리 설정
+gemini_logger = logging.getLogger("gemini_logger")
+gemini_logger.setLevel(logging.INFO)
+
+log_dir = os.path.join(os.path.dirname(__file__), "..", "logs")
+os.makedirs(log_dir, exist_ok=True)
+log_path = os.path.join(log_dir, "gemini_times.log")
+
+if not gemini_logger.handlers:
+    fh = logging.FileHandler(log_path, encoding='utf-8')
+    formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
+    fh.setFormatter(formatter)
+    gemini_logger.addHandler(fh)
 
 multimodal_gemini_bp = Blueprint('multimodal_gemini', __name__)
 
@@ -15,6 +30,8 @@ model = genai.GenerativeModel("gemini-1.5-flash-latest")
 
 @multimodal_gemini_bp.route("/api/multimodal_gemini", methods=["POST"])
 def handle_ai_opinion():
+    start_time = time.perf_counter()  # ✅ 속도 측정 시작
+
     data = request.get_json()
 
     mongo_client = current_app.extensions.get("mongo_client")
@@ -66,6 +83,10 @@ def handle_ai_opinion():
             {"_id": ObjectId(inference_result_id)},
             {"$set": {"AI_result": result_text}}
         )
+
+        total_time = time.perf_counter() - start_time
+        gemini_logger.info(f"[🧠 Gemini 멀티모달 추론 시간] {total_time:.4f}s (inference_result_id={inference_result_id})")
+
         print("✅ Gemini 응답 저장 완료")
         return jsonify({"message": result_text})
     except Exception as e:
