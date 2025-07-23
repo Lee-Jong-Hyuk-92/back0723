@@ -75,7 +75,9 @@ def predict_mask_and_overlay_only(pil_img, overlay_save_path):
     resized_img = pil_img.resize(mask_img.size).convert("RGBA")
     overlayed = Image.alpha_composite(resized_img, mask_img)
 
-    overlayed.save(overlay_save_path)
+    # ✅ RGBA → RGB 변환 후 PNG로 저장
+    overlayed = overlayed.convert("RGB")
+    overlayed.save(overlay_save_path, format="PNG")
     return overlayed
 
 # ✅ 주요 클래스 ID, confidence, 치아번호 라벨 포함 JSON 반환

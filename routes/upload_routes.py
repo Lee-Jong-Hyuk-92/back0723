@@ -40,7 +40,7 @@ def upload_plain_image():
 
 @upload_bp.route('/upload_masked_image', methods=['POST'])
 def upload_masked_image():
-    start_total = time.perf_counter()  # ✅ 전체 시작 시간
+    start_total = time.perf_counter()
 
     if 'file' not in request.files:
         return jsonify({'error': '이미지 파일이 필요합니다.'}), 400
@@ -65,6 +65,7 @@ def upload_masked_image():
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
         original_filename = secure_filename(file.filename)
         base_name = f"{user_id}_{timestamp}_{original_filename}"
+        base_name = os.path.splitext(base_name)[0] + ".png"  # ✅ 확장자 강제 변경
 
         upload_dir = current_app.config['UPLOAD_FOLDER_ORIGINAL']
         processed_dir_1 = current_app.config['PROCESSED_FOLDER_MODEL1']
@@ -80,14 +81,14 @@ def upload_masked_image():
         file.save(original_path)
 
         image = Image.open(original_path)
-        if image.mode == "RGBA" and base_name.lower().endswith(('.jpg', '.jpeg')):
+        if image.mode != "RGB":
             image = image.convert("RGB")
 
         # ✅ model1: 질병
         t1 = time.perf_counter()
         processed_path_1 = os.path.join(processed_dir_1, base_name)
         masked_image_1, lesion_points, backend_model_confidence, backend_model_name, disease_label = predict_overlayed_image(image)
-        masked_image_1.save(processed_path_1)
+        masked_image_1.save(processed_path_1, format='PNG')  # ✅ JPEG 저장 오류 방지
         upload_logger.info(f"[🧠 모델1] 질병 세그멘테이션 추론 시간: {time.perf_counter() - t1:.4f}s")
 
         # ✅ model2: 위생
@@ -104,7 +105,6 @@ def upload_masked_image():
         tooth_info = tooth_number_predictor.get_main_class_info_json(image)
         upload_logger.info(f"[🧠 모델3] 치아번호 세그멘테이션 추론 시간: {time.perf_counter() - t3:.4f}s")
 
-        # ✅ 총 소요 시간
         total_elapsed = time.perf_counter() - start_total
         upload_logger.info(f"[📸 전체 모델 추론 완료] 총 소요 시간: {total_elapsed:.4f}s (user_id={user_id})")
 
