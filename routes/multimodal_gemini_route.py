@@ -1,4 +1,5 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
+from bson import ObjectId
 import google.generativeai as genai
 from PIL import Image
 import requests
@@ -13,13 +14,14 @@ genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel("gemini-1.5-flash-latest")
 
 @multimodal_gemini_bp.route("/api/multimodal_gemini", methods=["POST"])
-def chat_gemini():
-    print("✅ [요청 수신] /api/multimodal_gemini")
-
+def handle_ai_opinion():
     data = request.get_json()
-    print(f"📦 받은 데이터: {data}")
+
+    mongo_client = current_app.extensions.get("mongo_client")
+    collection = mongo_client.get_collection("inference_results")
 
     image_url = data.get("image_url")
+    inference_result_id = data.get("inference_result_id")  # ✅ MongoDB _id
     model1 = data.get("model1Label")
     conf1 = data.get("model1Confidence")
     model2 = data.get("model2Label")
@@ -27,13 +29,22 @@ def chat_gemini():
     tooth_number = data.get("model3ToothNumber")
     conf3 = data.get("model3Confidence")
 
+    # ✅ 1. 기존 AI_result 확인
+    doc = collection.find_one({"_id": ObjectId(inference_result_id)})
+    if not doc:
+        return jsonify({"error": "해당 분석 결과를 찾을 수 없습니다."}), 404
+
+    if "AI_result" in doc:
+        print("📄 기존 AI_result 반환")
+        return jsonify({"message": doc["AI_result"]})
+
+    # ✅ 2. 없으면 Gemini로 생성
+    print("🔍 기존 AI_result 없음 → Gemini 호출 시작")
+
     try:
-        print(f"🌐 이미지 다운로드 중: {image_url}")
         img_resp = requests.get(image_url)
         img = Image.open(BytesIO(img_resp.content))
-        print("✅ 이미지 로드 완료")
     except Exception as e:
-        print(f"❌ 이미지 로드 실패: {e}")
         return jsonify({"error": f"이미지 로드 실패: {str(e)}"}), 400
 
     prompt = f"""
@@ -45,16 +56,17 @@ def chat_gemini():
 
 해당 이미지와 결과를 함께 고려해 설명해줘. 마지막엔 결론 한 줄로 요약해.
 """
-    print("🧠 Gemini 요청 전송 시작...")
 
     try:
-        start_time = time.time()
         response = model.generate_content([prompt, img])
-        elapsed_time = time.time() - start_time
-        print("✅ Gemini 응답 수신 완료")
-        print(f"🕒 응답 시간: {elapsed_time:.2f}초")
-        print(f"📝 응답 내용:\n{response.text}")
-        return jsonify({"message": response.text})
+        result_text = response.text
+
+        # ✅ 3. MongoDB에 결과 저장
+        collection.update_one(
+            {"_id": ObjectId(inference_result_id)},
+            {"$set": {"AI_result": result_text}}
+        )
+        print("✅ Gemini 응답 저장 완료")
+        return jsonify({"message": result_text})
     except Exception as e:
-        print(f"❌ Gemini 호출 실패: {e}")
         return jsonify({"error": f"Gemini 호출 실패: {str(e)}"}), 500
