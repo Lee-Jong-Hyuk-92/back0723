@@ -3,6 +3,7 @@ from pymongo.errors import ConnectionFailure
 import time
 import logging
 import os
+from flask_jwt_extended import jwt_required, get_jwt_identity
 
 # ✅ 챗봇 전용 로거 분리
 chatbot_logger = logging.getLogger("chatbot_logger")
@@ -26,15 +27,15 @@ def wants_image(user_message: str) -> bool:
     return any(kw in user_message for kw in keywords)
 
 @chatbot_bp.route('/chatbot', methods=['POST'])
+@jwt_required()  # ✅ 추가
 def chatbot_reply():
     start_time = time.time()
     user_message = "알 수 없는 메시지"
-    patient_id = "알 수 없는 ID"
+    patient_id = get_jwt_identity()  # ✅ JWT에서 추출
 
     try:
         data = request.json
         user_message = data.get('message', '메시지 없음')
-        patient_id = data.get('patient_id', 'ID 없음')
 
         app.logger.info(f"[💬 챗봇 요청] 사용자 메시지: '{user_message}', 환자 ID: '{patient_id}'")
         print(f"[💬 챗봇 요청] 사용자 메시지: '{user_message}', 환자 ID: '{patient_id}'")

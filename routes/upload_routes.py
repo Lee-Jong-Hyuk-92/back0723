@@ -6,7 +6,7 @@ from datetime import datetime
 from flask import Blueprint, request, jsonify, current_app
 from werkzeug.utils import secure_filename
 from PIL import Image
-
+from flask_jwt_extended import jwt_required, get_jwt_identity
 from ai_model.predictor import predict_overlayed_image              # model1: 질병
 from ai_model import hygiene_predictor, tooth_number_predictor      # model2: 위생, model3: 치아번호
 from models.model import MongoDBClient
@@ -31,22 +31,24 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in current_app.config['ALLOWED_EXTENSIONS']
 
 @upload_bp.route('/upload_image', methods=['POST'])
+@jwt_required()
 def upload_image_from_flutter():
     return upload_masked_image()
 
 @upload_bp.route('/upload', methods=['POST'])
+@jwt_required()  # ✅ 이 줄 추가
 def upload_plain_image():
     return upload_masked_image()
 
 @upload_bp.route('/upload_masked_image', methods=['POST'])
 def upload_masked_image():
+    user_id = get_jwt_identity()  # ✅ JWT에서 user_id 추출
     start_total = time.perf_counter()
 
     if 'file' not in request.files:
         return jsonify({'error': '이미지 파일이 필요합니다.'}), 400
 
     file = request.files['file']
-    user_id = request.form.get('user_id', 'anonymous')
 
     yolo_results_json_str = request.form.get('yolo_results_json')
     yolo_inference_data = []

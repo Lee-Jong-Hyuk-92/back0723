@@ -1,4 +1,4 @@
-# routes/chatbot_routes_medgemma.py
+# 안쓰는 파일
 from flask import Blueprint, request, jsonify, current_app as app
 import time
 import os

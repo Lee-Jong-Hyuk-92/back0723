@@ -87,10 +87,10 @@ def login():
         user_data["doctor_id" if role == 'D' else "user_id"] = getattr(user, "doctor_id" if role == 'D' else "user_id")
 
         # ✅ JWT 토큰 생성
-        access_token = create_access_token(identity={
-            "register_id": user.register_id,
-            "role": user.role
-        })
+        access_token = create_access_token(
+            identity=str(user.register_id),  # ✅ 문자열로 변환!
+            additional_claims={"role": user.role}
+        )
 
         return jsonify({
             "message": "Login successful",

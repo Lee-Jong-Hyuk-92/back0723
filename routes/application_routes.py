@@ -1,3 +1,5 @@
+# 안쓰는 파일
+
 from flask import Blueprint, request, jsonify, current_app
 from models.location_model import db, Location
 from models.application_model import ApplicationModel
