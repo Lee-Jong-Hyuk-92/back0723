@@ -28,7 +28,7 @@ API_KEY = os.getenv("GEMINI_API_KEY")
 genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel("gemini-1.5-flash-latest")
 
-@multimodal_gemini_bp.route("/api/multimodal_gemini", methods=["POST"])
+@multimodal_gemini_bp.route("/multimodal_gemini", methods=["POST"])
 def handle_ai_opinion():
     start_time = time.perf_counter()  # ✅ 속도 측정 시작
 

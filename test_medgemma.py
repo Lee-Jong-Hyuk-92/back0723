@@ -7,7 +7,7 @@ from google.cloud import storage
 import time # time 모듈 임포트
 
 # ✅ 환경변수로 GCP 인증 키 등록
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = r"C:\Users\302-1\Desktop\backend0709-1\meditooth-7ce9efd0794b.json"
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = r"meditooth-7ce9efd0794b.json"
 
 # ✅ GCP 프로젝트 설정
 PROJECT_ID = "meditooth"
@@ -53,7 +53,7 @@ def upload_blob(bucket_name, source_file_name, destination_blob_name):
 # ✅ 업로드할 이미지 및 GCS 설정
 GCS_BUCKET_NAME = "meditooth-medgemma-images-temp"
 GCS_IMAGE_DESTINATION_PATH = "oral_image_896x896.jpeg"
-local_image_path = r"C:\Users\302-1\Desktop\backend0709-1\images\original\121212_20250722160653484634_web_image.png"
+local_image_path = r"C:\Users\302-1\Desktop\back0723\images\model1\121212_20250724153839479471_web_image.png"
 
 # ✅ 이미지 업로드
 print(f"📤 Uploading image to GCS: {GCS_BUCKET_NAME}/{GCS_IMAGE_DESTINATION_PATH}")
@@ -65,9 +65,62 @@ except Exception as e:
     exit()
 
 # ✅ 프롬프트 정의
-system_instruction = "당신은 의학 전문가입니다. 매우 자세하게 설명해 주세요."
+system_instruction = "너는 치과 전문의야. 이 사진에 대해 자세히 설명해줘. 특히 어떤 상황인지, 주요 특징은 무엇인지 알려줘. 마지막에 한줄 결론도 적어줘."
 user_prompt = """
-타이레놀(아세트아미노펜) 계열 약을 먹고있는데 속으 안좋아 이거 괜찮은거야?
+
+_id
+6881d4f35954b846b686a7c8
+user_id
+"121212"
+original_image_path
+"/images/original/121212_20250724153839479471_web_image.png"
+
+original_image_yolo_detections
+Array (empty)
+model1_image_path
+"/images/model1/121212_20250724153839479471_web_image.png"
+
+model1_inference_result
+Object
+message
+"model1 마스크 생성 완료"
+
+lesion_points
+Array (1600)
+confidence
+0.8067517280578613
+used_model
+"disease_model_saved_weight.pt"
+label
+"잇몸 염증 초기"
+model2_image_path
+"/images/model2/121212_20250724153839479471_web_image.png"
+
+model2_inference_result
+Object
+message
+"model2 마스크 생성 완료"
+class_id
+7
+confidence
+0.5540841817855835
+label
+"치석 단계2 (tar2)"
+model3_image_path
+"/images/model3/121212_20250724153839479471_web_image.png"
+
+model3_inference_result
+Object
+message
+"model3 마스크 생성 완료"
+class_id
+28
+confidence
+0.5090081691741943
+tooth_number_fdi
+44
+timestamp
+2025-07-24T15:38:43.229+00:00
 
 """
 

@@ -22,8 +22,9 @@ class MongoDBClient:
 
     def insert_result(self, result_data):
         try:
-            self.inference_results_collection.insert_one(result_data)
-            print(f"MongoDB 'inference_results'에 문서 삽입 성공.")
+            result = self.inference_results_collection.insert_one(result_data)
+            print(f"MongoDB 'inference_results'에 문서 삽입 성공: {result.inserted_id}")
+            return result.inserted_id  # ✅ 이 줄이 꼭 필요함!
         except Exception as e:
             print(f"MongoDB 'inference_results' 문서 삽입 실패: {e}")
             raise

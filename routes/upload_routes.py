@@ -111,7 +111,7 @@ def upload_masked_image():
         upload_logger.info(f"[📸 전체 모델 추론 완료] 총 소요 시간: {total_elapsed:.4f}s (user_id={user_id})")
 
         mongo_client = MongoDBClient()
-        mongo_client.insert_result({
+        inserted_id = mongo_client.insert_result({
             'user_id': user_id,
             'original_image_path': f"/images/original/{base_name}",
             'original_image_yolo_detections': yolo_inference_data,
@@ -146,6 +146,7 @@ def upload_masked_image():
 
         return jsonify({
             'message': '3개 모델 처리 및 저장 완료',
+            'inference_result_id': str(inserted_id),  # ✅ 추가됨
             'original_image_path': f"/images/original/{base_name}",
             'original_image_yolo_detections': yolo_inference_data,
 

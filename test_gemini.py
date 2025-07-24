@@ -12,7 +12,7 @@ MODEL_NAME = "gemini-1.5-flash-latest"
 model = genai.GenerativeModel(MODEL_NAME)
 
 # --- 3. 분석할 이미지 파일 경로 지정 ---
-IMAGE_PATH = r"C:\Users\302-1\Desktop\backend0709-1\images\original\121212_20250722160653484634_web_image.png"
+IMAGE_PATH = r"C:\Users\302-1\Desktop\back0723\images\model1\121212_20250724153839479471_web_image.png"
 
 # --- 4. 이미지 파일 로드 ---
 try:
@@ -29,17 +29,19 @@ except Exception as e:
 prompt = """
 너는 치과 전문의야. 이 사진에 대해 자세히 설명해줘. 특히 어떤 상황인지, 주요 특징은 무엇인지 알려줘. 마지막에 한줄 결론도 적어줘.
 
+
+
 _id
-687f38913c7dfd2c80537995
+6881d4f35954b846b686a7c8
 user_id
 "121212"
 original_image_path
-"/images/original/121212_20250722160653484634_web_image.png"
+"/images/original/121212_20250724153839479471_web_image.png"
 
 original_image_yolo_detections
 Array (empty)
 model1_image_path
-"/images/model1/121212_20250722160653484634_web_image.png"
+"/images/model1/121212_20250724153839479471_web_image.png"
 
 model1_inference_result
 Object
@@ -47,41 +49,42 @@ message
 "model1 마스크 생성 완료"
 
 lesion_points
-Array (613)
+Array (1600)
 confidence
-0.7220852375030518
+0.8067517280578613
 used_model
 "disease_model_saved_weight.pt"
 label
-"충치 초기"
+"잇몸 염증 초기"
 model2_image_path
-"/images/model2/121212_20250722160653484634_web_image.png"
+"/images/model2/121212_20250724153839479471_web_image.png"
 
 model2_inference_result
 Object
 message
 "model2 마스크 생성 완료"
 class_id
--1
+7
 confidence
-0
+0.5540841817855835
 label
-"Unknown"
+"치석 단계2 (tar2)"
 model3_image_path
-"/images/model3/121212_20250722160653484634_web_image.png"
+"/images/model3/121212_20250724153839479471_web_image.png"
 
 model3_inference_result
 Object
 message
 "model3 마스크 생성 완료"
 class_id
-31
+28
 confidence
-0.6953080296516418
+0.5090081691741943
 tooth_number_fdi
-47
+44
 timestamp
-2025-07-22T16:06:57.897+00:00
+2025-07-24T15:38:43.229+00:00
+
 """
 
 print(f"\n[{MODEL_NAME}] 모델로 요청을 보냅니다...")

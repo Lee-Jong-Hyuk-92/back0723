@@ -25,4 +25,8 @@ venv/
 *.json
 .env
 
-*.log
+chatbot_times.log
+gemini_times.log
+inference_times.log
+
+logs
