@@ -1,9 +1,16 @@
+import os
 import bcrypt
+import random
+import string
+import smtplib
 from flask import Blueprint, request, jsonify
 from models.model import db, User, Doctor
 from flask_jwt_extended import create_access_token
+from email.message import EmailMessage
+from dotenv import load_dotenv
 
 auth_bp = Blueprint('auth', __name__)
+load_dotenv()  # .env 로드
 
 # ✅ 아이디 중복 체크
 @auth_bp.route('/check-username', methods=['GET'])
@@ -86,9 +93,8 @@ def login():
         }
         user_data["doctor_id" if role == 'D' else "user_id"] = getattr(user, "doctor_id" if role == 'D' else "user_id")
 
-        # ✅ JWT 토큰 생성
         access_token = create_access_token(
-            identity=str(user.register_id),  # ✅ 문자열로 변환!
+            identity=str(user.register_id),
             additional_claims={"role": user.role}
         )
 
@@ -99,6 +105,7 @@ def login():
         }), 200
 
     return jsonify({"message": "Invalid credentials"}), 401
+
 
 # ✅ 회원 탈퇴
 @auth_bp.route('/delete_account', methods=['DELETE'])
@@ -146,7 +153,7 @@ def reauthenticate():
         return jsonify({"success": False, "message": "비밀번호가 일치하지 않습니다."}), 401
 
 
-# ✅ 프로필 수정 (이 부분이 추가됨)
+# ✅ 프로필 수정
 @auth_bp.route('/update-profile', methods=['PUT'])
 def update_profile():
     data = request.get_json()
@@ -155,7 +162,7 @@ def update_profile():
     gender = data.get('gender')
     birth = data.get('birth')
     phone = data.get('phone')
-    password = data.get('password')  # 🔸 추가됨
+    password = data.get('password')
     role = data.get('role', 'P')
 
     if not all([register_id, name, gender, birth, phone, password]):
@@ -171,7 +178,7 @@ def update_profile():
     user.gender = gender
     user.birth = birth
     user.phone = phone
-    user.password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')  # 🔐 비밀번호 해싱
+    user.password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
     try:
         db.session.commit()
@@ -179,3 +186,68 @@ def update_profile():
     except Exception as e:
         db.session.rollback()
         return jsonify({'message': '업데이트 중 오류가 발생했습니다.', 'error': str(e)}), 500
+
+
+# ✅ 아이디 찾기
+@auth_bp.route('/find_id', methods=['POST'])
+def find_id():
+    data = request.get_json()
+    name = data.get('name')
+    phone = data.get('phone')
+
+    if not name or not phone:
+        return jsonify({'message': '이름과 전화번호를 모두 입력해주세요.'}), 400
+
+    user = User.query.filter_by(name=name, phone=phone).first()
+    if not user:
+        user = Doctor.query.filter_by(name=name, phone=phone).first()
+
+    if user:
+        return jsonify({'register_id': user.register_id}), 200
+    else:
+        return jsonify({'message': '일치하는 사용자 정보를 찾을 수 없습니다.'}), 404
+
+
+# ✅ 비밀번호 찾기 + 메일 전송
+@auth_bp.route('/find_password', methods=['POST'])
+def find_password():
+    data = request.get_json()
+    name = data.get('name')
+    phone = data.get('phone')
+
+    if not name or not phone:
+        return jsonify({'message': '이름과 전화번호를 모두 입력해주세요.'}), 400
+
+    user = User.query.filter_by(name=name, phone=phone).first()
+    if not user:
+        user = Doctor.query.filter_by(name=name, phone=phone).first()
+
+    if not user:
+        return jsonify({'message': '일치하는 사용자 정보를 찾을 수 없습니다.'}), 404
+
+    # 임시 비밀번호 생성
+    temp_password = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
+    hashed_temp_pw = bcrypt.hashpw(temp_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    user.password = hashed_temp_pw
+
+    try:
+        db.session.commit()
+
+        # 이메일 전송
+        email_sender = os.getenv("EMAIL_USER")
+        email_password = os.getenv("EMAIL_PASS")
+
+        msg = EmailMessage()
+        msg['Subject'] = 'MediTooth 임시 비밀번호 안내'
+        msg['From'] = email_sender
+        msg['To'] = 'sa4667@naver.com'
+        msg.set_content(f"안녕하세요.\n\n임시 비밀번호는 다음과 같습니다:\n\n{temp_password}\n\n로그인 후 반드시 비밀번호를 변경해주세요.")
+
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+            smtp.login(email_sender, email_password)
+            smtp.send_message(msg)
+
+        return jsonify({'message': '비밀번호 재설정 링크가 이메일로 전송되었습니다.'}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'message': '비밀번호 초기화 중 오류 발생', 'error': str(e)}), 500
