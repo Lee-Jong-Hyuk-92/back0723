@@ -30,3 +30,7 @@ gemini_times.log
 inference_times.log
 
 logs
+
+detect_250717/
+
+*.pem

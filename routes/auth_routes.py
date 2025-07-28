@@ -74,6 +74,8 @@ def signup():
 # ✅ 로그인
 @auth_bp.route('/login', methods=['POST'])
 def login():
+    if request.method == 'OPTIONS':
+        return '', 200  # preflight 대응
     data = request.get_json()
     role = data.get('role', 'P')
     register_id = data.get('register_id')
