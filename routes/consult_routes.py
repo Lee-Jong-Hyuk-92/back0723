@@ -3,20 +3,22 @@ from models.consult_model import ConsultRequest
 from models.model import db, User, Doctor
 from datetime import datetime, timedelta
 import json
+from flask_jwt_extended import jwt_required, get_jwt_identity
 
 consult_bp = Blueprint('consult', __name__)
 
 # ✅ 1. 신청 등록
 @consult_bp.route('', methods=['POST'])
+@jwt_required()
 def create_consult():
     data = request.json
     try:
-        user_id = data.get('user_id')
+        user_id = get_jwt_identity()  # JWT에서 추출
         image_path = data.get('image_path')
         request_datetime = data.get('request_datetime')
 
-        if not user_id or not image_path or not request_datetime:
-            return jsonify({'error': '필수 필드 누락 (user_id, image_path, request_datetime)'}), 400
+        if not image_path or not request_datetime:
+            return jsonify({'error': '필수 필드 누락 (image_path, request_datetime)'}), 400
 
         if User.query.filter_by(register_id=user_id).first() is None:
             return jsonify({'error': 'Invalid user_id'}), 400
@@ -45,12 +47,14 @@ def create_consult():
 
 # ✅ 2. 신청 취소
 @consult_bp.route('/cancel', methods=['POST'])
+@jwt_required()
 def cancel_consult():
     data = request.json
     request_id = data.get('request_id')
+    user_id = get_jwt_identity()
 
     consult = ConsultRequest.query.get(request_id)
-    if consult and consult.is_replied == 'N':
+    if consult and consult.user_id == user_id and consult.is_replied == 'N':
         consult.is_requested = 'N'
         consult.is_replied = 'N'
         db.session.commit()
@@ -146,8 +150,9 @@ def list_consult_requests():
 
 # ✅ 6. 사용자 진행중 진료 조회
 @consult_bp.route('/active', methods=['GET'])
+@jwt_required()
 def get_active_consult_request():
-    user_id = request.args.get('user_id')
+    user_id = get_jwt_identity()
     active = ConsultRequest.query.filter_by(user_id=user_id, is_requested='Y', is_replied='N').order_by(ConsultRequest.id.desc()).first()
     if active:
         return jsonify({
