@@ -23,7 +23,22 @@ def create_consult():
         if User.query.filter_by(register_id=user_id).first() is None:
             return jsonify({'error': 'Invalid user_id'}), 400
 
-        existing = ConsultRequest.query.filter_by(user_id=user_id, is_requested='Y', is_replied='N').first()
+        # ✅ 1. 답변 완료된 경우 재신청 차단
+        already_replied = ConsultRequest.query.filter_by(
+            user_id=user_id,
+            image_path=image_path,
+            is_requested='Y',
+            is_replied='Y'
+        ).first()
+        if already_replied:
+            return jsonify({'error': '이미 답변 완료된 진단입니다. 다시 신청할 수 없습니다.'}), 400
+
+        # ✅ 2. 현재 신청 중이면 중복 신청 차단
+        existing = ConsultRequest.query.filter_by(
+            user_id=user_id,
+            is_requested='Y',
+            is_replied='N'
+        ).first()
         if existing:
             return jsonify({'error': '이미 신청 중인 진료가 있습니다.'}), 400
 
