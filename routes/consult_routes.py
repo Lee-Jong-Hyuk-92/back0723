@@ -6,60 +6,41 @@ import json
 
 consult_bp = Blueprint('consult', __name__)
 
-# ✅ 1. 신청 등록 (프론트 전체 필드 수신 대응)
+# ✅ 1. 신청 등록
 @consult_bp.route('', methods=['POST'])
 def create_consult():
     data = request.json
     try:
         user_id = data.get('user_id')
-        register_id = data.get('register_id')
-        name = data.get('name')
-        phone = data.get('phone')
-        birth = data.get('birth')
-        gender = data.get('gender')
-        role = data.get('role')
-        inference_result_id = data.get('inference_result_id')
-        clinic = data.get('clinic')
-        address = data.get('address')
-        original_image_url = data.get('original_image_url')
-        processed_image_urls = json.dumps(data.get('processed_image_urls', {}))
-        model_infos = json.dumps(data.get('model_infos', {}))
-        request_datetime = datetime.strptime(data.get('request_datetime')[:14], '%Y%m%d%H%M%S')
-    except Exception as e:
-        print(f"❌ 데이터 파싱 실패: {e}")
-        return jsonify({'error': 'Invalid request format'}), 400
+        image_path = data.get('image_path')
+        request_datetime = data.get('request_datetime')
 
-    if User.query.filter_by(register_id=user_id).first() is None:
-        return jsonify({'error': 'Invalid user_id'}), 400
+        if not user_id or not image_path or not request_datetime:
+            return jsonify({'error': '필수 필드 누락 (user_id, image_path, request_datetime)'}), 400
 
-    existing = ConsultRequest.query.filter_by(user_id=user_id, is_requested='Y', is_replied='N').first()
-    if existing:
-        return jsonify({'error': '이미 신청 중인 진료가 있습니다.'}), 400
+        if User.query.filter_by(register_id=user_id).first() is None:
+            return jsonify({'error': 'Invalid user_id'}), 400
 
-    try:
+        existing = ConsultRequest.query.filter_by(user_id=user_id, is_requested='Y', is_replied='N').first()
+        if existing:
+            return jsonify({'error': '이미 신청 중인 진료가 있습니다.'}), 400
+
         consult = ConsultRequest(
             user_id=user_id,
-            register_id=register_id,
-            name=name,
-            phone=phone,
-            birth=birth,
-            gender=gender,
-            role=role,
-            inference_result_id=inference_result_id,
-            clinic=clinic,
-            address=address,
-            original_image_url=original_image_url,
-            processed_image_urls=processed_image_urls,
-            model_infos=model_infos,
+            image_path=image_path,
             request_datetime=request_datetime,
             is_requested='Y',
             is_replied='N'
         )
+
         db.session.add(consult)
         db.session.commit()
+
         return jsonify({'message': 'Consultation request created'}), 201
+
     except Exception as e:
         db.session.rollback()
+        print(f"❌ 신청 실패: {e}")
         return jsonify({'error': f'Database error: {e}'}), 500
 
 # ✅ 2. 신청 취소
@@ -69,10 +50,11 @@ def cancel_consult():
     request_id = data.get('request_id')
 
     consult = ConsultRequest.query.get(request_id)
-    if consult and consult.is_requested == 'Y' and consult.is_replied == 'N':
-        db.session.delete(consult)
+    if consult and consult.is_replied == 'N':
+        consult.is_requested = 'N'
+        consult.is_replied = 'N'
         db.session.commit()
-        return jsonify({'message': 'Request deleted'}), 200
+        return jsonify({'message': 'Request cancelled'}), 200
 
     return jsonify({'error': 'Cannot cancel this request'}), 400
 
@@ -153,7 +135,7 @@ def list_consult_requests():
                 'user_id': consult.user_id,
                 'user_name': user.name if user else '',
                 'image_path': consult.image_path,
-                'request_datetime': consult.request_datetime.strftime('%Y-%m-%d %H:%M:%S') \
+                'request_datetime': consult.request_datetime.strftime('%Y-%m-%d %H:%M:%S')
                     if isinstance(consult.request_datetime, datetime) else consult.request_datetime,
                 'is_replied': consult.is_replied
             })
@@ -166,8 +148,7 @@ def list_consult_requests():
 @consult_bp.route('/active', methods=['GET'])
 def get_active_consult_request():
     user_id = request.args.get('user_id')
-    active = ConsultRequest.query.filter_by(user_id=user_id, is_replied='N') \
-        .order_by(ConsultRequest.id.desc()).first()
+    active = ConsultRequest.query.filter_by(user_id=user_id, is_requested='Y', is_replied='N').order_by(ConsultRequest.id.desc()).first()
     if active:
         return jsonify({
             'image_path': active.image_path,
