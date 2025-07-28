@@ -27,29 +27,6 @@ app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'super-secret-key')  
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = 3600  # 초 단위 (1시간)
 jwt = JWTManager(app)
 
-# ✅ GCP 서비스 계정 키 설정
-CREDENTIALS_FILE_NAME = "gcp_credentials.json"
-CREDENTIALS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), CREDENTIALS_FILE_NAME)
-
-if not os.path.exists(CREDENTIALS_PATH):
-    raise FileNotFoundError(f"GCP 서비스 계정 키 파일을 찾을 수 없습니다: {CREDENTIALS_PATH}")
-
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = CREDENTIALS_PATH
-print(f"✅ GOOGLE_APPLICATION_CREDENTIALS 환경 변수 설정됨: {CREDENTIALS_PATH}")
-
-# ✅ Vertex AI 초기화
-PROJECT_ID = "meditooth"
-REGION = "us-central1"
-vertexai.init(project=PROJECT_ID, location=REGION)
-
-# ✅ MedGemma 모델 로드
-MEDGEMMA_MODEL_NAME = "medgemma"
-try:
-    medgemma_model = GenerativeModel(MEDGEMMA_MODEL_NAME)
-    print(f"✅ MedGemma 모델 '{MEDGEMMA_MODEL_NAME}' 로드 성공.")
-except Exception as e:
-    raise ValueError(f"MedGemma 모델 '{MEDGEMMA_MODEL_NAME}' 로드 실패: {e}")
-
 # ✅ Gemini API 키 설정 및 모델 로드
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
@@ -61,8 +38,6 @@ try:
     print(f"✅ Gemini 모델 'gemini-2.5-flash' 로드 성공.")
 except Exception as e:
     raise ValueError(f"Gemini 모델 로드 실패: {e}")
-
-print(f"✅ 연결된 DB URI: {app.config['SQLALCHEMY_DATABASE_URI']}")
 
 # ✅ 폴더 생성
 os.makedirs(app.config['UPLOAD_FOLDER_ORIGINAL'], exist_ok=True)
@@ -84,7 +59,6 @@ except Exception as e:
 # ✅ 앱 확장 객체 등록
 app.extensions = getattr(app, 'extensions', {})
 app.extensions['mongo_client'] = mongo_client
-app.extensions['medgemma_model'] = medgemma_model
 app.extensions['gemini_model'] = gemini_model
 
 with app.app_context():

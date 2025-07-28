@@ -155,3 +155,63 @@ def get_active_consult_request():
             'request_id': active.id
         }), 200
     return jsonify({'image_path': None, 'request_id': None}), 200
+
+# ✅ 7. 오늘 날짜 기준 요청 수 반환
+@consult_bp.route('/today-count', methods=['GET'])
+def today_request_count():
+    try:
+        today = datetime.now().date()
+        start = datetime.combine(today, datetime.min.time())
+        end = datetime.combine(today, datetime.max.time())
+
+        count = ConsultRequest.query.filter(
+            ConsultRequest.request_datetime >= start,
+            ConsultRequest.request_datetime <= end
+        ).count()
+
+        return jsonify({'count': count}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ✅ 오늘 날짜 기준 상태별 요청 수 반환
+@consult_bp.route('/today-status-counts', methods=['GET'])
+def today_status_counts():
+    try:
+        today = datetime.now().date()
+        start = datetime.combine(today, datetime.min.time())
+        end = datetime.combine(today, datetime.max.time())
+
+        total = ConsultRequest.query.filter(
+            ConsultRequest.request_datetime >= start,
+            ConsultRequest.request_datetime <= end
+        ).count()
+
+        pending = ConsultRequest.query.filter(
+            ConsultRequest.request_datetime >= start,
+            ConsultRequest.request_datetime <= end,
+            ConsultRequest.is_requested == 'Y',
+            ConsultRequest.is_replied == 'N'
+        ).count()
+
+        completed = ConsultRequest.query.filter(
+            ConsultRequest.request_datetime >= start,
+            ConsultRequest.request_datetime <= end,
+            ConsultRequest.is_requested == 'Y',
+            ConsultRequest.is_replied == 'Y'
+        ).count()
+
+        canceled = ConsultRequest.query.filter(
+            ConsultRequest.request_datetime >= start,
+            ConsultRequest.request_datetime <= end,
+            ConsultRequest.is_requested == 'N',
+            ConsultRequest.is_replied == 'N'
+        ).count()
+
+        return jsonify({
+            'total': total,
+            'pending': pending,
+            'completed': completed,
+            'canceled': canceled
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
