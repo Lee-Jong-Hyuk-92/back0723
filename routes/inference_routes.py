@@ -18,7 +18,7 @@ def get_inference_results():
             collection = mongo_client.get_collection("inference_results")
             documents = list(collection.find())
 
-            server_base_url = "https://192.168.0.19:5000"  # ✅ MySQL에 저장된 경로 형식과 맞추기
+            server_base_url = "http://192.168.0.19:5000"  # ✅ MySQL에 저장된 경로 형식과 맞추기
 
             for doc in documents:
                 doc["_id"] = str(doc["_id"])

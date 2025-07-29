@@ -17,7 +17,7 @@ from flask_jwt_extended import JWTManager
 # ✅ Flask 앱 생성 및 설정
 app = Flask(__name__)
 app.config.from_object(DevelopmentConfig)
-CORS(app, supports_credentials=True)
+CORS(app)
 
 # ✅ .env 설정 로드
 load_dotenv()
@@ -99,4 +99,4 @@ def internal_error(error):
 
 # ✅ 실행
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, ssl_context=('cert.pem', 'key.pem'))
+    app.run(host='0.0.0.0', port=5000, debug=True)
