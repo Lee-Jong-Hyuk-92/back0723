@@ -135,7 +135,7 @@ def chatbot_reply():
                 selected_record = None
 
             def to_url(path):
-                return f"http://192.168.0.19:5000{path}" if path else None
+                return f"https://192.168.0.19:5000{path}" if path else None
 
             if selected_record:
                 image_urls = {

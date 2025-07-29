@@ -4,7 +4,7 @@ import os
 import time # time 모듈 임포트
 
 # --- 1. Gemini API 키 설정 ---
-API_KEY = "AIzaSyCHl0KRXd7oE4qzz0AbIzhGm_Ia2CpVNB0"
+API_KEY = ""
 genai.configure(api_key=API_KEY)
 
 # --- 2. 사용할 Gemini 모델 선택 ---
@@ -12,7 +12,7 @@ MODEL_NAME = "gemini-1.5-flash-latest"
 model = genai.GenerativeModel(MODEL_NAME)
 
 # --- 3. 분석할 이미지 파일 경로 지정 ---
-IMAGE_PATH = r"C:\Users\302-1\Desktop\back0723\images\model1\121212_20250724153839479471_web_image.png"
+IMAGE_PATH = r""
 
 # --- 4. 이미지 파일 로드 ---
 try:

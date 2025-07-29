@@ -28,3 +28,9 @@ logs
 ai_model/detect_250717
 test_tooth_number_overlay.py
 overlay_tooth_number_yolo.py
+
+logs
+
+detect_250717/
+
+*.pem

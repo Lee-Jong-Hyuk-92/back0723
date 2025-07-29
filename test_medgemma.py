@@ -17,7 +17,7 @@ LOCATION = "us-central1"
 vertexai.init(project=PROJECT_ID, location=LOCATION)
 
 # ✅ MedGemma Endpoint ID
-MEDGEMMA_ENDPOINT_ID = "7198930337072676864"
+MEDGEMMA_ENDPOINT_ID = ""
 
 # ✅ 엔드포인트 연결
 try:
