@@ -18,7 +18,7 @@ log_path = os.path.join(log_dir, "gemini_times.log")
 
 if not gemini_logger.handlers:
     fh = logging.FileHandler(log_path, encoding='utf-8')
-    formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
+    formatter = logging.Formatter('%(asctime)s.%(msecs)03d [%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
     fh.setFormatter(formatter)
     gemini_logger.addHandler(fh)
 
@@ -38,7 +38,7 @@ def handle_ai_opinion():
     collection = mongo_client.get_collection("inference_results")
 
     image_url = data.get("image_url")
-    inference_result_id = data.get("inference_result_id")  # ✅ MongoDB _id
+    inference_result_id = data.get("inference_result_id")
     model1 = data.get("model1Label")
     conf1 = data.get("model1Confidence")
     model2 = data.get("model2Label")
@@ -46,7 +46,6 @@ def handle_ai_opinion():
     tooth_number = data.get("model3ToothNumber")
     conf3 = data.get("model3Confidence")
 
-    # ✅ 1. 기존 AI_result 확인
     doc = collection.find_one({"_id": ObjectId(inference_result_id)})
     if not doc:
         return jsonify({"error": "해당 분석 결과를 찾을 수 없습니다."}), 404
@@ -55,7 +54,6 @@ def handle_ai_opinion():
         print("📄 기존 AI_result 반환")
         return jsonify({"message": doc["AI_result"]})
 
-    # ✅ 2. 없으면 Gemini로 생성
     print("🔍 기존 AI_result 없음 → Gemini 호출 시작")
 
     try:
@@ -78,16 +76,17 @@ def handle_ai_opinion():
         response = model.generate_content([prompt, img])
         result_text = response.text
 
-        # ✅ 3. MongoDB에 결과 저장
+        # ✅ 결과 저장
         collection.update_one(
             {"_id": ObjectId(inference_result_id)},
             {"$set": {"AI_result": result_text}}
         )
 
-        total_time = time.perf_counter() - start_time
-        gemini_logger.info(f"[🧠 Gemini 멀티모달 추론 시간] {total_time:.4f}s (inference_result_id={inference_result_id})")
+        elapsed_time_ms = int((time.perf_counter() - start_time) * 1000)
+        gemini_logger.info(f"[🧠 Gemini 멀티모달 추론 시간] {elapsed_time_ms}ms (inference_result_id={inference_result_id})")
 
         print("✅ Gemini 응답 저장 완료")
         return jsonify({"message": result_text})
+
     except Exception as e:
         return jsonify({"error": f"Gemini 호출 실패: {str(e)}"}), 500

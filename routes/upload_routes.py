@@ -91,24 +91,24 @@ def upload_masked_image():
         processed_path_1 = os.path.join(processed_dir_1, base_name)
         masked_image_1, lesion_points, backend_model_confidence, backend_model_name, disease_label = predict_overlayed_image(image)
         masked_image_1.save(processed_path_1, format='PNG')  # ✅ JPEG 저장 오류 방지
-        upload_logger.info(f"[🧠 모델1] 질병 세그멘테이션 추론 시간: {time.perf_counter() - t1:.4f}s")
+        upload_logger.info(f"[🧠 모델1] 질병 세그멘테이션 추론 시간: {int((time.perf_counter() - t1) * 1000)}ms")
 
         # ✅ model2: 위생
         t2 = time.perf_counter()
         processed_path_2 = os.path.join(processed_dir_2, base_name)
         hygiene_predictor.predict_mask_and_overlay_only(image, processed_path_2)
         hygiene_class_id, hygiene_conf, hygiene_label = hygiene_predictor.get_main_class_and_confidence_and_label(image)
-        upload_logger.info(f"[🧠 모델2] 위생 세그멘테이션 추론 시간: {time.perf_counter() - t2:.4f}s")
+        upload_logger.info(f"[🧠 모델2] 위생 세그멘테이션 추론 시간: {int((time.perf_counter() - t2) * 1000)}ms")
 
         # ✅ model3: 치아번호
         t3 = time.perf_counter()
         processed_path_3 = os.path.join(processed_dir_3, base_name)
         tooth_number_predictor.predict_mask_and_overlay_only(image, processed_path_3)
         tooth_info = tooth_number_predictor.get_main_class_info_json(image)
-        upload_logger.info(f"[🧠 모델3] 치아번호 세그멘테이션 추론 시간: {time.perf_counter() - t3:.4f}s")
+        upload_logger.info(f"[🧠 모델3] 치아번호 세그멘테이션 추론 시간: {int((time.perf_counter() - t3) * 1000)}ms")
 
         total_elapsed = time.perf_counter() - start_total
-        upload_logger.info(f"[📸 전체 모델 추론 완료] 총 소요 시간: {total_elapsed:.4f}s (user_id={user_id})")
+        upload_logger.info(f"[📸 전체 모델 추론 완료] 총 소요 시간: {int(total_elapsed * 1000)}ms (user_id={user_id})")
 
         mongo_client = MongoDBClient()
         inserted_id = mongo_client.insert_result({
