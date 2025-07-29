@@ -30,6 +30,8 @@ class DevelopmentConfig:
     PROCESSED_FOLDER_MODEL1 = os.path.join(IMAGE_BASE_DIR, 'model1')
     PROCESSED_FOLDER_MODEL2 = os.path.join(IMAGE_BASE_DIR, 'model2')
     PROCESSED_FOLDER_MODEL3 = os.path.join(IMAGE_BASE_DIR, 'model3')
+    PROCESSED_FOLDER_XMODEL1 = os.path.join(IMAGE_BASE_DIR, 'xmodel1')
+    PROCESSED_FOLDER_XMODEL2 = os.path.join(IMAGE_BASE_DIR, 'xmodel2')
 
     # 허용 확장자
     ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}

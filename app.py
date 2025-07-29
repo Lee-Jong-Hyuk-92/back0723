@@ -75,6 +75,7 @@ from routes.consult_routes import consult_bp
 from routes.chatbot_routes import chatbot_bp
 from routes.chatbot_routes_medgemma import chatbot_med_bp
 from routes.multimodal_gemini_route import multimodal_gemini_bp
+from routes.multimodal_gemini_xray_route import multimodal_gemini_xray_bp  # ✅ 추가
 
 app.register_blueprint(auth_bp, url_prefix='/api/auth')
 app.register_blueprint(image_bp)
@@ -86,6 +87,7 @@ app.register_blueprint(consult_bp, url_prefix='/api/consult')
 app.register_blueprint(chatbot_bp, url_prefix='/api')
 app.register_blueprint(chatbot_med_bp, url_prefix='/api')
 app.register_blueprint(multimodal_gemini_bp, url_prefix='/api')
+app.register_blueprint(multimodal_gemini_xray_bp, url_prefix='/api')  # ✅ 추가
 
 # ✅ 기본 라우트
 @app.route('/')
