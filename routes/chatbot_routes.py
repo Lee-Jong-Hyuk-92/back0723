@@ -4,6 +4,7 @@ import time
 import logging
 import os
 from flask_jwt_extended import jwt_required, get_jwt_identity
+from config import DevelopmentConfig
 
 # ✅ 챗봇 전용 로거 분리
 chatbot_logger = logging.getLogger("chatbot_logger")
@@ -135,13 +136,27 @@ def chatbot_reply():
                 selected_record = None
 
             def to_url(path):
-                return f"http://192.168.0.19:5000{path}" if path else None
+                return f"{DevelopmentConfig.INTERNAL_BASE_URL}{path}" if path else None
 
             if selected_record:
-                image_urls = {
-                    k: to_url(selected_record.get(f"{k}_image_path"))
-                    for k in ["original", "model1", "model2", "model3"]
-                }
+                image_type = selected_record.get("image_type", "normal")
+                if image_type == "xray":
+                    image_urls = {
+                        "original": to_url(selected_record.get("original_image_path")),
+                        "xmodel1": to_url(
+                            selected_record.get("xmodel1_image_path") or selected_record.get("model1_image_path")
+                        ),
+                        "xmodel2": to_url(
+                            selected_record.get("xmodel2_image_path") or selected_record.get("model2_image_path")
+                        )
+                    }
+                    print("[🖼️ 반환된 이미지 URLs]", image_urls)
+                else:
+                    image_urls = {
+                        k: to_url(selected_record.get(f"{k}_image_path"))
+                        for k in ["original", "model1", "model2", "model3"]
+                    }
+
                 image_urls = {k: v for k, v in image_urls.items() if v}
 
         elapsed_time = int((time.time() - start_time) * 1000)

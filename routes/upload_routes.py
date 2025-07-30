@@ -97,11 +97,16 @@ def upload_masked_image():
             import cv2
             import numpy as np
 
+            t_start = time.perf_counter()  # 🔹 시간 측정 시작
             detect_result = detect_xray(original_path)
             filtered_boxes = detect_result['detections']  # 이미 정상치아 제외됨
 
+            elapsed_ms = int((time.perf_counter() - t_start) * 1000)
+            upload_logger.info(f"[🦷 X-ray] YOLO 탐지 완료 - {len(filtered_boxes)}개 객체, {elapsed_ms}ms 소요 (user_id={user_id})")
+
             # ✅ 한글 폰트 경로 (Windows용 예시)
             font_path = "C:/Windows/Fonts/malgun.ttf"  # 또는 나눔폰트 경로
+            #font_path = "/usr/share/fonts/truetype/nanum/NanumGothic.ttf"  # 또는 나눔폰트 경로
             font = ImageFont.truetype(font_path, 18)
 
             image_draw = image.copy()

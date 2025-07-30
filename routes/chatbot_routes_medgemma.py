@@ -7,6 +7,7 @@ from datetime import datetime
 from PIL import Image
 import io
 from vertexai.preview.generative_models import Part
+from config import DevelopmentConfig
 
 chatbot_med_bp = Blueprint('chatbot_medgemma', __name__)
 
@@ -79,7 +80,7 @@ def chat_with_medgemma():
 
         # 이미지 준비
         image_path = found_record.get('original_image_path', '')
-        image_url = f"http://192.168.0.19:5000{image_path}" if image_path else None
+        image_url = f"{DevelopmentConfig.INTERNAL_BASE_URL}{image_path}" if image_path else None
         image_bytes = preprocess_image_for_medgemma(image_path)
         image_part = Part.from_data(data=image_bytes, mime_type="image/jpeg") if image_bytes else None
 

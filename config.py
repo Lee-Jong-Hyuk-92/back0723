@@ -35,3 +35,6 @@ class DevelopmentConfig:
 
     # 허용 확장자
     ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
+
+    # ✅ 내부 접근용 BASE URL
+    INTERNAL_BASE_URL = os.getenv('INTERNAL_BASE_URL', 'http://localhost:5000')  # 디폴트 포함
