@@ -10,6 +10,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from ai_model.predictor import predict_overlayed_image              # model1: 질병
 from ai_model import hygiene_predictor, tooth_number_predictor      # model2: 위생, model3: 치아번호
 from models.model import MongoDBClient
+from PIL import ImageDraw, ImageFont
 
 # ✅ 업로드 전용 로거 분리 설정
 upload_logger = logging.getLogger("upload_logger")
@@ -89,31 +90,45 @@ def upload_masked_image():
         image = Image.open(original_path)
         if image.mode != "RGB":
             image = image.convert("RGB")
-        # ✅ X-ray 처리
+
+        # ✅ X-ray 처리 분기
         if image_type == 'xray':
-            from ultralytics import YOLO
-            detect_model = YOLO("ai_model/xray_detect_best.pt")
-            results = detect_model(original_path)[0]
+            from ai_model.xray_detector import detect_xray
+            import cv2
+            import numpy as np
 
-            boxes = results.boxes
-            annotated_image = results.plot()
+            detect_result = detect_xray(original_path)
+            filtered_boxes = detect_result['detections']  # 이미 정상치아 제외됨
+
+            # ✅ 한글 폰트 경로 (Windows용 예시)
+            font_path = "C:/Windows/Fonts/malgun.ttf"  # 또는 나눔폰트 경로
+            font = ImageFont.truetype(font_path, 18)
+
+            image_draw = image.copy()
+            draw = ImageDraw.Draw(image_draw)
+
+            for det in filtered_boxes:
+                x1, y1, x2, y2 = map(int, det['bbox'])
+                label = f"{det['class_name']} {det['confidence']:.2f}"
+                draw.rectangle([x1, y1, x2, y2], outline="blue", width=2)
+                draw.text((x1, y1 - 20), label, font=font, fill="blue")
+
+            # ✅ 시각화 저장
             processed_path_x1 = os.path.join(xmodel1_dir, base_name)
-            Image.fromarray(annotated_image).save(processed_path_x1)
+            image_draw.save(processed_path_x1)
 
-            # 빈 xmodel2 이미지 생성 (optional)
+            # ✅ 빈 이미지 생성
             processed_path_x2 = os.path.join(xmodel2_dir, base_name)
             empty_image = Image.new('RGB', image.size, color=(255, 255, 255))
             empty_image.save(processed_path_x2)
 
             yolo_predictions = []
-            for i in range(len(boxes.cls)):
-                cls_id = int(boxes.cls[i])
-                conf = float(boxes.conf[i])
-                xyxy = list(map(float, boxes.xyxy[i]))
+            for det in filtered_boxes:
                 yolo_predictions.append({
-                    "class_id": cls_id,
-                    "confidence": round(conf, 3),
-                    "bbox": xyxy
+                    "class_id": det['class_id'],
+                    "class_name": det['class_name'],
+                    "confidence": round(det['confidence'], 3),
+                    "bbox": det['bbox']
                 })
 
             mongo_client = MongoDBClient()
@@ -143,7 +158,7 @@ def upload_masked_image():
             }), 200
 
         else:
-            # ✅ 일반 이미지 처리 (3개 모델)
+            # ✅ 일반 이미지 처리 (기존 3개 모델)
             t1 = time.perf_counter()
             processed_path_1 = os.path.join(processed_dir_1, base_name)
             masked_image_1, lesion_points, backend_model_confidence, backend_model_name, disease_label = predict_overlayed_image(image)
@@ -195,6 +210,7 @@ def upload_masked_image():
                 },
                 'timestamp': datetime.now()
             })
+
             return jsonify({
                 'message': '3개 모델 처리 및 저장 완료',
                 'inference_result_id': str(inserted_id),
@@ -224,5 +240,6 @@ def upload_masked_image():
                 },
                 'timestamp': datetime.now()
             }), 200
+
     except Exception as e:
         return jsonify({'error': f'서버 처리 중 오류: {str(e)}'}), 500

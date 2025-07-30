@@ -24,12 +24,18 @@ def detect_xray(image_path: str):
 
     for box in boxes:
         cls_id = int(box.cls.item())
+        class_name = CLASS_NAMES[cls_id]
+        
+        # ✅ 정상치아는 제외
+        if class_name == '정상치아':
+            continue
+
         confidence = float(box.conf.item())
         coords = box.xyxy[0].tolist()  # [x1, y1, x2, y2]
 
         predictions.append({
             'class_id': cls_id,
-            'class_name': CLASS_NAMES[cls_id],
+            'class_name': class_name,
             'confidence': confidence,
             'bbox': coords
         })
