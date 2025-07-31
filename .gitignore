@@ -1,10 +1,8 @@
 # __pycache__ 파이썬 캐시 무시
 __pycache__/
-
 # 가상환경 무시
 venv/
 .venv/
-
 # 모델 파일 및 대용량 파일 무시
 *.pt
 *.tflite
@@ -15,18 +13,25 @@ venv/
 *.png
 # SQLite/MySQL DB 파일 무시
 *.db
-
-# 환경 변수 파일 무시
-
 # Mac, VSCode 등 사용 시
 .DS_Store
 .vscode/
-
 *.json
+# 환경 변수 파일 무시
 .env
-
+# 로그 파일 무시
 chatbot_times.log
 gemini_times.log
 inference_times.log
+logs
+# 모델 파일, 모델 테스트 파일 무시
+ai_model/detect_250717
+test_tooth_number_overlay.py
+overlay_tooth_number_yolo.py
 
 logs
+
+detect_250717/
+
+*.pem
+realtime_test.py

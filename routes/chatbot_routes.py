@@ -4,6 +4,7 @@ import time
 import logging
 import os
 from flask_jwt_extended import jwt_required, get_jwt_identity
+from config import DevelopmentConfig
 
 # ✅ 챗봇 전용 로거 분리
 chatbot_logger = logging.getLogger("chatbot_logger")
@@ -15,7 +16,7 @@ log_path = os.path.join(log_dir, "chatbot_times.log")
 
 if not chatbot_logger.handlers:
     fh = logging.FileHandler(log_path, encoding='utf-8')
-    formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
+    formatter = logging.Formatter('%(asctime)s.%(msecs)03d [%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
     fh.setFormatter(formatter)
     chatbot_logger.addHandler(fh)
 
@@ -45,7 +46,7 @@ def chatbot_reply():
             app.logger.error("[❌ MongoDB] mongo_client가 앱 익스텐션에 없습니다.")
             return jsonify({
                 'response': '서버 오류: DB 클라이언트가 초기화되지 않았습니다.',
-                'elapsed_time': round(time.time() - start_time, 2)
+                'elapsed_time': int((time.time() - start_time) * 1000)
             }), 500
 
         try:
@@ -54,7 +55,7 @@ def chatbot_reply():
             app.logger.error(f"[❌ MongoDB] MongoDB 연결 실패: {e}")
             return jsonify({
                 'response': '데이터베이스 연결에 문제가 발생했습니다.',
-                'elapsed_time': round(time.time() - start_time, 2)
+                'elapsed_time': int((time.time() - start_time) * 1000)
             }), 500
 
         query_patient_id = str(patient_id)
@@ -85,7 +86,7 @@ def chatbot_reply():
             app.logger.error("[❌ Gemini] Gemini 모델이 앱 익스텐션에 없습니다.")
             return jsonify({
                 'response': '서버 오류: AI 모델이 초기화되지 않았습니다.',
-                'elapsed_time': round(time.time() - start_time, 2)
+                'elapsed_time': int((time.time() - start_time) * 1000)
             }), 500
 
         chat = gemini_model.start_chat()
@@ -117,7 +118,6 @@ def chatbot_reply():
         image_urls = {}
 
         if diagnosis_count > 0 and wants_image(user_message):
-            # ✅ "N번째 기록" 요청
             import re
             nth_match = re.search(r'(\d+)[번째\s]*기록', user_message)
             if nth_match:
@@ -136,18 +136,32 @@ def chatbot_reply():
                 selected_record = None
 
             def to_url(path):
-                return f"http://192.168.0.19:5000{path}" if path else None
+                return f"{DevelopmentConfig.INTERNAL_BASE_URL}{path}" if path else None
 
             if selected_record:
-                image_urls = {
-                    k: to_url(selected_record.get(f"{k}_image_path"))
-                    for k in ["original", "model1", "model2", "model3"]
-                }
+                image_type = selected_record.get("image_type", "normal")
+                if image_type == "xray":
+                    image_urls = {
+                        "original": to_url(selected_record.get("original_image_path")),
+                        "xmodel1": to_url(
+                            selected_record.get("xmodel1_image_path") or selected_record.get("model1_image_path")
+                        ),
+                        "xmodel2": to_url(
+                            selected_record.get("xmodel2_image_path") or selected_record.get("model2_image_path")
+                        )
+                    }
+                    print("[🖼️ 반환된 이미지 URLs]", image_urls)
+                else:
+                    image_urls = {
+                        k: to_url(selected_record.get(f"{k}_image_path"))
+                        for k in ["original", "model1", "model2", "model3"]
+                    }
+
                 image_urls = {k: v for k, v in image_urls.items() if v}
 
-        elapsed_time = round(time.time() - start_time, 2)
-        app.logger.info(f"[⏱️ 응답 시간] {elapsed_time}초")
-        chatbot_logger.info(f"[🤖 챗봇 응답 시간] {elapsed_time:.2f}s (user_id={patient_id}, 메시지: {user_message})")
+        elapsed_time = int((time.time() - start_time) * 1000)
+        app.logger.info(f"[⏱️ 응답 시간] {elapsed_time}ms")
+        chatbot_logger.info(f"[🤖 챗봇 응답 시간] {elapsed_time}ms (user_id={patient_id}, 메시지: {user_message})")
 
         return jsonify({
             'response': reply,
@@ -159,5 +173,5 @@ def chatbot_reply():
         app.logger.error(f"[❌ 챗봇 오류] 예외 발생: {e}", exc_info=True)
         return jsonify({
             'response': '시스템 오류가 발생했습니다.',
-            'elapsed_time': round(time.time() - start_time, 2)
+            'elapsed_time': int((time.time() - start_time) * 1000)
         }), 500

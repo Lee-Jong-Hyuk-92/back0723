@@ -2,36 +2,29 @@ from flask import Blueprint, request, jsonify
 from models.consult_model import ConsultRequest
 from models.model import db, User, Doctor
 from datetime import datetime, timedelta
-import json
 
 consult_bp = Blueprint('consult', __name__)
 
-# ✅ 1. 신청 등록 (프론트 전체 필드 수신 대응)
+# ✅ 1. 신청 등록
 @consult_bp.route('', methods=['POST'])
 def create_consult():
     data = request.json
     try:
         user_id = data.get('user_id')
-        register_id = data.get('register_id')
-        name = data.get('name')
-        phone = data.get('phone')
-        birth = data.get('birth')
-        gender = data.get('gender')
-        role = data.get('role')
-        inference_result_id = data.get('inference_result_id')
-        clinic = data.get('clinic')
-        address = data.get('address')
-        original_image_url = data.get('original_image_url')
-        processed_image_urls = json.dumps(data.get('processed_image_urls', {}))
-        model_infos = json.dumps(data.get('model_infos', {}))
-        request_datetime = datetime.strptime(data.get('request_datetime')[:14], '%Y%m%d%H%M%S')
+        image_path = data.get('original_image_url')  # 모델에는 image_path로 저장됨
+        request_datetime_str = data.get('request_datetime')
+        if not request_datetime_str or len(request_datetime_str) < 14:
+            raise ValueError("Invalid request_datetime")
+        request_datetime = datetime.strptime(request_datetime_str[:14], '%Y%m%d%H%M%S')
     except Exception as e:
         print(f"❌ 데이터 파싱 실패: {e}")
         return jsonify({'error': 'Invalid request format'}), 400
 
+    # 사용자 존재 확인
     if User.query.filter_by(register_id=user_id).first() is None:
         return jsonify({'error': 'Invalid user_id'}), 400
 
+    # 중복 신청 여부 확인
     existing = ConsultRequest.query.filter_by(user_id=user_id, is_requested='Y', is_replied='N').first()
     if existing:
         return jsonify({'error': '이미 신청 중인 진료가 있습니다.'}), 400
@@ -39,18 +32,7 @@ def create_consult():
     try:
         consult = ConsultRequest(
             user_id=user_id,
-            register_id=register_id,
-            name=name,
-            phone=phone,
-            birth=birth,
-            gender=gender,
-            role=role,
-            inference_result_id=inference_result_id,
-            clinic=clinic,
-            address=address,
-            original_image_url=original_image_url,
-            processed_image_urls=processed_image_urls,
-            model_infos=model_infos,
+            image_path=image_path,
             request_datetime=request_datetime,
             is_requested='Y',
             is_replied='N'
@@ -62,21 +44,61 @@ def create_consult():
         db.session.rollback()
         return jsonify({'error': f'Database error: {e}'}), 500
 
+
 # ✅ 2. 신청 취소
 @consult_bp.route('/cancel', methods=['POST'])
 def cancel_consult():
     data = request.json
-    request_id = data.get('request_id')
+    user_id = data.get('user_id')
+    image_path = data.get('original_image_url')  # 👈 프론트에서 보내주는 상대 경로 그대로 사용
 
-    consult = ConsultRequest.query.get(request_id)
-    if consult and consult.is_requested == 'Y' and consult.is_replied == 'N':
+    if not user_id or not image_path:
+        return jsonify({'error': 'Missing parameters'}), 400
+
+    consult = ConsultRequest.query.filter_by(
+        user_id=user_id,
+        image_path=image_path,
+        is_requested='Y',
+        is_replied='N'
+    ).order_by(ConsultRequest.id.desc()).first()
+
+    if consult:
         db.session.delete(consult)
         db.session.commit()
         return jsonify({'message': 'Request deleted'}), 200
 
     return jsonify({'error': 'Cannot cancel this request'}), 400
 
-# ✅ 3. 의사 응답
+
+# ✅ 3. 특정 이미지에 대한 신청 상태 조회
+@consult_bp.route('/status', methods=['GET'])
+def get_consult_status():
+    user_id = request.args.get('user_id')
+    image_path = request.args.get('image_path')
+
+    if not user_id or not image_path:
+        return jsonify({'error': 'Missing parameters'}), 400
+
+    # ✅ 중복 대비: 최신 데이터 기준
+    consult = ConsultRequest.query.filter_by(user_id=user_id, image_path=image_path) \
+        .order_by(ConsultRequest.id.desc()).first()
+
+    if consult:
+        print(f"[CONSULT STATUS] user_id={user_id}, image_path={image_path} -> is_requested={consult.is_requested}, is_replied={consult.is_replied}")
+        return jsonify({
+            'is_requested': consult.is_requested,
+            'is_replied': consult.is_replied
+        }), 200
+
+    print(f"[CONSULT STATUS] user_id={user_id}, image_path={image_path} -> 신청 기록 없음")
+    return jsonify({
+        'is_requested': 'N',
+        'is_replied': 'N'
+    }), 200
+
+
+
+# ✅ 4. 의사 응답
 @consult_bp.route('/reply', methods=['POST'])
 def doctor_reply():
     data = request.json
@@ -100,7 +122,8 @@ def doctor_reply():
 
     return jsonify({'error': 'Request not found or already completed'}), 400
 
-# ✅ 4. 통계 조회
+
+# ✅ 5. 통계 조회
 @consult_bp.route('/stats', methods=['GET'])
 def consult_stats():
     date_str = request.args.get('date')
@@ -131,7 +154,8 @@ def consult_stats():
     except Exception as e:
         return jsonify({'error': str(e)}), 400
 
-# ✅ 5. 진료 신청 리스트 조회 (오늘 기준)
+
+# ✅ 6. 진료 신청 리스트 조회
 @consult_bp.route('/list', methods=['GET'])
 def list_consult_requests():
     try:
@@ -141,8 +165,8 @@ def list_consult_requests():
 
         consults = ConsultRequest.query.filter(
             ConsultRequest.is_requested == 'Y',
-            ConsultRequest.request_datetime >= start,
-            ConsultRequest.request_datetime <= end
+            ConsultRequest.request_datetime >= start, #오늘만이 아닌 기존 날짱에서도 처리안된걸 확인하려면 주석처리
+            ConsultRequest.request_datetime <= end #오늘만이 아닌 기존 날짱에서도 처리안된걸 확인하려면 주석처리
         ).order_by(ConsultRequest.request_datetime.desc()).all()
 
         result = []
@@ -162,7 +186,8 @@ def list_consult_requests():
     except Exception as e:
         return jsonify({'error': 'Failed to fetch consult list'}), 500
 
-# ✅ 6. 사용자 진행중 진료 조회
+
+# ✅ 7. 사용자 진행 중 진료 조회
 @consult_bp.route('/active', methods=['GET'])
 def get_active_consult_request():
     user_id = request.args.get('user_id')

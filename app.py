@@ -7,7 +7,7 @@ from models.model import db, MongoDBClient
 
 # ✅ Vertex AI 및 dotenv
 import vertexai
-from vertexai.preview.generative_models import GenerativeModel, Part, Image as VertexAIImage
+from vertexai.preview.generative_models import GenerativeModel
 import google.generativeai as genai
 from dotenv import load_dotenv
 
@@ -17,16 +17,18 @@ from flask_jwt_extended import JWTManager
 # ✅ Flask 앱 생성 및 설정
 app = Flask(__name__)
 app.config.from_object(DevelopmentConfig)
+app.config["SERVER_BASE_URL"] = None  # ✅ 최초에는 None으로 초기화
 CORS(app)
 
 # ✅ .env 설정 로드
 load_dotenv()
 
 # ✅ JWT 설정
-app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'super-secret-key')  # .env에 꼭 넣기
-app.config['JWT_ACCESS_TOKEN_EXPIRES'] = 3600  # 초 단위 (1시간)
+app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'super-secret-key')
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = 3600
 jwt = JWTManager(app)
 
+"""
 # ✅ GCP 서비스 계정 키 설정
 CREDENTIALS_FILE_NAME = "gcp_credentials.json"
 CREDENTIALS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), CREDENTIALS_FILE_NAME)
@@ -49,6 +51,7 @@ try:
     print(f"✅ MedGemma 모델 '{MEDGEMMA_MODEL_NAME}' 로드 성공.")
 except Exception as e:
     raise ValueError(f"MedGemma 모델 '{MEDGEMMA_MODEL_NAME}' 로드 실패: {e}")
+"""
 
 # ✅ Gemini API 키 설정 및 모델 로드
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -84,11 +87,17 @@ except Exception as e:
 # ✅ 앱 확장 객체 등록
 app.extensions = getattr(app, 'extensions', {})
 app.extensions['mongo_client'] = mongo_client
-app.extensions['medgemma_model'] = medgemma_model
 app.extensions['gemini_model'] = gemini_model
 
 with app.app_context():
     db.create_all()
+
+# ✅ 최초 요청 시 host_url을 캐싱
+@app.before_request
+def cache_host_url():
+    if not app.config.get("SERVER_BASE_URL"):
+        app.config["SERVER_BASE_URL"] = request.host_url.rstrip("/")
+        print(f"✅ 서버 주소 캐싱됨: {app.config['SERVER_BASE_URL']}")
 
 # ✅ 라우트 등록
 from routes.auth_routes import auth_bp
@@ -101,6 +110,7 @@ from routes.consult_routes import consult_bp
 from routes.chatbot_routes import chatbot_bp
 from routes.chatbot_routes_medgemma import chatbot_med_bp
 from routes.multimodal_gemini_route import multimodal_gemini_bp
+from routes.multimodal_gemini_xray_route import multimodal_gemini_xray_bp  # ✅ 추가
 
 app.register_blueprint(auth_bp, url_prefix='/api/auth')
 app.register_blueprint(image_bp)
@@ -112,6 +122,7 @@ app.register_blueprint(consult_bp, url_prefix='/api/consult')
 app.register_blueprint(chatbot_bp, url_prefix='/api')
 app.register_blueprint(chatbot_med_bp, url_prefix='/api')
 app.register_blueprint(multimodal_gemini_bp, url_prefix='/api')
+app.register_blueprint(multimodal_gemini_xray_bp, url_prefix='/api')  # ✅ 추가
 
 # ✅ 기본 라우트
 @app.route('/')
