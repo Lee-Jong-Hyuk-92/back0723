@@ -102,6 +102,7 @@ def upload_masked_image():
             from ai_model.xray_detector import detect_xray
             detect_result = detect_xray(original_path)
             filtered_boxes = detect_result['detections']
+            summary_text = detect_result.get('summary', '감지된 객체가 없습니다.')
 
             upload_logger.info(f"[🦷 X-ray] YOLO 탐지 완료 - {len(filtered_boxes)}개 객체 (user_id={user_id})")
 
@@ -124,12 +125,14 @@ def upload_masked_image():
             empty_image = Image.new('RGB', image.size, color=(255, 255, 255))
             empty_image.save(processed_path_x2)
 
-            yolo_predictions = [{
-                "class_id": det['class_id'],
-                "class_name": det['class_name'],
-                "confidence": round(det['confidence'], 3),
-                "bbox": det['bbox']
-            } for det in filtered_boxes]
+            yolo_predictions = [  # for compatibility
+                {
+                    "class_id": det['class_id'],
+                    "class_name": det['class_name'],
+                    "confidence": round(det['confidence'], 3),
+                    "bbox": det['bbox']
+                } for det in filtered_boxes
+            ]
 
             mongo_client = MongoDBClient()
             inserted_id = mongo_client.insert_result({
@@ -141,7 +144,8 @@ def upload_masked_image():
                 'model2_image_path': f"/images/xmodel2/{base_name}",
                 'model1_inference_result': {
                     'used_model': 'xray_detect_best.pt',
-                    'predictions': yolo_predictions
+                    'predictions': yolo_predictions,
+                    'summary': summary_text  # ✅ 요약 포함
                 },
                 'timestamp': datetime.now()
             })
@@ -149,13 +153,14 @@ def upload_masked_image():
             return jsonify({
                 'message': 'X-ray 이미지 YOLO 처리 완료',
                 'inference_result_id': str(inserted_id),
-                'image_type': image_type,  # ✅ 추가됨
+                'image_type': image_type,
                 'original_image_path': f"/images/original/{base_name}",
                 'model1_image_path': f"/images/xmodel1/{base_name}",
                 'model2_image_path': f"/images/xmodel2/{base_name}",
                 'model1_inference_result': {
                     'used_model': 'xray_detect_best.pt',
-                    'predictions': yolo_predictions
+                    'predictions': yolo_predictions,
+                    'summary': summary_text  # ✅ 클라이언트 응답에도 포함
                 }
             }), 200
 

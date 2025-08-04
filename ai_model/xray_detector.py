@@ -1,7 +1,7 @@
-# xray_detect_best.pt 모델을 이용한 추론코드, 아직 반영전
 from ultralytics import YOLO
 from PIL import Image
 import torch
+from collections import Counter
 
 # ✅ 모델 로드
 model_path = 'ai_model/xray_detect_best.pt'
@@ -25,7 +25,7 @@ def detect_xray(image_path: str):
     for box in boxes:
         cls_id = int(box.cls.item())
         class_name = CLASS_NAMES[cls_id]
-        
+
         # ✅ 정상치아는 제외
         if class_name == '정상치아':
             continue
@@ -40,8 +40,17 @@ def detect_xray(image_path: str):
             'bbox': coords
         })
 
+    # ✅ 요약 텍스트 생성 (예: "보철물 6개 감지")
+    class_counter = Counter([p['class_name'] for p in predictions])
+    if class_counter:
+        top_class, top_count = class_counter.most_common(1)[0]
+        summary = f"{top_class} {top_count}개 감지"
+    else:
+        summary = "감지된 객체 없음"
+
     return {
         'image_path': image_path,
         'detections': predictions,
-        'model': model_path
+        'model': model_path,
+        'summary': summary
     }
