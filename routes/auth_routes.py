@@ -15,7 +15,7 @@ load_dotenv()  # .env 로드
 # ✅ 아이디 중복 체크
 @auth_bp.route('/check-username', methods=['GET'])
 def check_username_duplicate():
-    register_id = request.args.get('username')
+    register_id = request.args.get('register_id')
     if not register_id:
         return jsonify({"message": "Username parameter is required"}), 400
 
@@ -32,7 +32,7 @@ def check_username_duplicate():
 def signup():
     data = request.get_json()
     role = data.get('role', 'P')
-    register_id = data.get('username')
+    register_id = data.get('register_id')
     password = data.get('password')
     name = data.get('name')
     gender = data.get('gender')
@@ -112,7 +112,7 @@ def login():
 def delete_account():
     data = request.get_json()
     role = data.get('role', 'P')
-    register_id = data.get('username')
+    register_id = data.get('register_id')
     password = data.get('password')
 
     if not register_id or not password:
