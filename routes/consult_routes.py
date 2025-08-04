@@ -14,24 +14,22 @@ def create_consult():
     data = request.json
     try:
         user_id = data.get('user_id')
-        image_path = data.get('original_image_url')  # 모델에는 image_path로 저장됨
+        image_path = data.get('original_image_url')
         request_datetime_str = data.get('request_datetime')
         if not request_datetime_str or len(request_datetime_str) < 14:
             raise ValueError("Invalid request_datetime")
         request_datetime = datetime.strptime(request_datetime_str[:14], '%Y%m%d%H%M%S')
-    except Exception as e:
-        print(f"❌ 데이터 파싱 실패: {e}")
-        return jsonify({'error': 'Invalid request format'}), 400
 
-    # 사용자 존재 확인
-    if User.query.filter_by(register_id=user_id).first() is None:
-        return jsonify({'error': 'Invalid user_id'}), 400
+        # 사용자 존재 확인
+        if User.query.filter_by(register_id=user_id).first() is None:
+            return jsonify({'error': 'Invalid user_id'}), 400
 
-    # 중복 신청 여부 확인
-    existing = ConsultRequest.query.filter_by(user_id=user_id, is_requested='Y', is_replied='N').first()
-    if existing:
-        return jsonify({'error': '이미 신청 중인 진료가 있습니다.'}), 400
+        # 중복 신청 여부 확인
+        existing = ConsultRequest.query.filter_by(user_id=user_id, is_requested='Y', is_replied='N').first()
+        if existing:
+            return jsonify({'error': '이미 신청 중인 진료가 있습니다.'}), 400
 
+        # 새로운 신청 등록
         consult = ConsultRequest(
             user_id=user_id,
             image_path=image_path,
@@ -49,7 +47,6 @@ def create_consult():
         db.session.rollback()
         print(f"❌ 신청 실패: {e}")
         return jsonify({'error': f'Database error: {e}'}), 500
-
 
 # ✅ 2. 신청 취소
 @consult_bp.route('/cancel', methods=['POST'])

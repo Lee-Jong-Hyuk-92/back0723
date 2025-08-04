@@ -36,7 +36,7 @@ genai.configure(api_key=GEMINI_API_KEY)
 
 try:
     gemini_model = genai.GenerativeModel("models/gemini-2.5-flash")
-    print(f"✅ Gemini 모델 'gemini-2.5-flash' 로드 성공.")
+    # print(f"✅ Gemini 모델 'gemini-2.5-flash' 로드 성공.")
 except Exception as e:
     raise ValueError(f"Gemini 모델 로드 실패: {e}")
 
@@ -52,7 +52,7 @@ mongo_client = MongoDBClient(uri=app.config['MONGO_URI'], db_name=app.config['MO
 
 try:
     mongo_client.client.admin.command('ping')
-    print(f"✅ MongoDB에 성공적으로 연결되었습니다: {app.config['MONGO_URI']}")
+    # print(f"✅ MongoDB에 성공적으로 연결되었습니다: {app.config['MONGO_URI']}")
 except Exception as e:
     print(f"❌ MongoDB 연결 실패: {e}")
     sys.exit(1)
@@ -70,7 +70,7 @@ with app.app_context():
 def cache_host_url():
     if not app.config.get("SERVER_BASE_URL"):
         app.config["SERVER_BASE_URL"] = request.host_url.rstrip("/")
-        print(f"✅ 서버 주소 캐싱됨: {app.config['SERVER_BASE_URL']}")
+        # print(f"✅ 서버 주소 캐싱됨: {app.config['SERVER_BASE_URL']}")
 
 # ✅ 라우트 등록
 from routes.auth_routes import auth_bp

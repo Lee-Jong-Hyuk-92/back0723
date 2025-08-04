@@ -70,7 +70,6 @@ def signup():
         db.session.rollback()
         return jsonify({"message": "Error registering user", "error": str(e)}), 500
 
-
 # ✅ 로그인
 @auth_bp.route('/login', methods=['POST'])
 def login():
@@ -108,7 +107,6 @@ def login():
 
     return jsonify({"message": "Invalid credentials"}), 401
 
-
 # ✅ 회원 탈퇴
 @auth_bp.route('/delete_account', methods=['DELETE'])
 def delete_account():
@@ -133,7 +131,6 @@ def delete_account():
     except Exception as e:
         db.session.rollback()
         return jsonify({"message": "회원 탈퇴 중 오류가 발생했습니다.", "error": str(e)}), 500
-
 
 # ✅ 비밀번호 재확인
 @auth_bp.route('/reauthenticate', methods=['POST'])
