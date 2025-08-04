@@ -8,6 +8,7 @@ from models.model import db, User, Doctor
 from flask_jwt_extended import create_access_token
 from email.message import EmailMessage
 from dotenv import load_dotenv
+import re  # 정규식 유효성 검사용
 
 auth_bp = Blueprint('auth', __name__)
 load_dotenv()  # .env 로드
@@ -38,9 +39,27 @@ def signup():
     gender = data.get('gender')
     birth = data.get('birth')
     phone = data.get('phone')
-
+    
+    # 유효성 검사
     if not all([register_id, password, name, gender, birth, phone]):
         return jsonify({"message": "모든 필드를 입력해야 합니다."}), 400
+
+    # ✅ 이름: 한글만, 최대 18바이트
+    try:
+        if not re.fullmatch(r'[가-힣]+', name):
+            return jsonify({"message": "이름은 한글만 입력 가능합니다."}), 400
+        if len(name.encode('utf-8')) > 18:
+            return jsonify({"message": "이름은 최대 18바이트(6글자)까지 입력 가능합니다."}), 400
+    except Exception as e:
+        return jsonify({"message": f"이름 검증 중 오류 발생: {str(e)}"}), 400
+
+    # ✅ 아이디: 영문+숫자만 허용, 4~20자
+    if not re.fullmatch(r'[a-zA-Z0-9]{4,20}', register_id):
+        return jsonify({"message": "아이디는 영문과 숫자로 4~20자여야 합니다."}), 400
+
+    # ✅ 비밀번호: 6~20자
+    if len(password) < 6 or len(password) > 20:
+        return jsonify({"message": "비밀번호는 6자 이상 20자 이하여야 합니다."}), 400
 
     user_exists = User.query.filter_by(register_id=register_id).first()
     doctor_exists = Doctor.query.filter_by(register_id=register_id).first()
