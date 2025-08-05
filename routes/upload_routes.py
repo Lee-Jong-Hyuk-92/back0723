@@ -98,34 +98,18 @@ def upload_masked_image():
         if image.mode != "RGB":
             image = image.convert("RGB")
 
+        # ✅ YOLO 탐지 후 임플란트 분류까지 포함된 X-ray 처리 블록
         if image_type == 'xray':
             from ai_model.xray_detector import detect_xray
+            from ai_model.predict_implant_manufacturer import classify_implants_from_xray
+
             detect_result = detect_xray(original_path)
             filtered_boxes = detect_result['detections']
             summary_text = detect_result.get('summary', '감지된 객체가 없습니다.')
 
             upload_logger.info(f"[🦷 X-ray] YOLO 탐지 완료 - {len(filtered_boxes)}개 객체 (user_id={user_id})")
 
-            font_path = "C:/Windows/Fonts/malgun.ttf"
-            font = ImageFont.truetype(font_path, 18)
-
-            image_draw = image.copy()
-            draw = ImageDraw.Draw(image_draw)
-
-            for det in filtered_boxes:
-                x1, y1, x2, y2 = map(int, det['bbox'])
-                label = f"{det['class_name']} {det['confidence']:.2f}"
-                draw.rectangle([x1, y1, x2, y2], outline="blue", width=2)
-                draw.text((x1, y1 - 20), label, font=font, fill="blue")
-
-            processed_path_x1 = os.path.join(xmodel1_dir, base_name)
-            image_draw.save(processed_path_x1)
-
-            processed_path_x2 = os.path.join(xmodel2_dir, base_name)
-            empty_image = Image.new('RGB', image.size, color=(255, 255, 255))
-            empty_image.save(processed_path_x2)
-
-            yolo_predictions = [  # for compatibility
+            yolo_predictions = [
                 {
                     "class_id": det['class_id'],
                     "class_name": det['class_name'],
@@ -134,6 +118,37 @@ def upload_masked_image():
                 } for det in filtered_boxes
             ]
 
+            # ✅ 임플란트 분류 먼저 수행
+            implant_classification_results = classify_implants_from_xray(original_path)
+            upload_logger.info(f"[🏷️ 임플란트 분류] {len(implant_classification_results)}개 결과 생성")
+
+            # ✅ xmodel1 YOLO 박스 오버레이 저장
+            image_draw = image.copy()
+            draw = ImageDraw.Draw(image_draw)
+            font_path = "C:/Windows/Fonts/malgun.ttf"
+            font = ImageFont.truetype(font_path, 18)
+            for det in filtered_boxes:
+                x1, y1, x2, y2 = map(int, det['bbox'])
+                label = f"{det['class_name']} {det['confidence']:.2f}"
+                draw.rectangle([x1, y1, x2, y2], outline="blue", width=2)
+                draw.text((x1, y1 - 20), label, font=font, fill="blue")
+            processed_path_x1 = os.path.join(xmodel1_dir, base_name)
+            image_draw.save(processed_path_x1)
+
+            # ✅ xmodel2 임플란트 제조사 분류 오버레이 저장
+            image_with_manufacturer = image.copy()
+            draw = ImageDraw.Draw(image_with_manufacturer)
+            for result in implant_classification_results:
+                x1, y1, x2, y2 = result['bbox']
+                name = result['predicted_manufacturer_name']
+                conf = result['confidence'] * 100
+                label = f"{name} ({conf:.1f}%)"
+                draw.rectangle([x1, y1, x2, y2], outline="red", width=2)
+                draw.text((x1, y1 - 22), label, fill="yellow", font=font)
+            processed_path_x2 = os.path.join(xmodel2_dir, base_name)
+            image_with_manufacturer.save(processed_path_x2)
+
+            # ✅ 결과 저장 및 응답
             mongo_client = MongoDBClient()
             inserted_id = mongo_client.insert_result({
                 'user_id': user_id,
@@ -145,13 +160,14 @@ def upload_masked_image():
                 'model1_inference_result': {
                     'used_model': 'xray_detect_best.pt',
                     'predictions': yolo_predictions,
-                    'summary': summary_text  # ✅ 요약 포함
+                    'summary': summary_text
                 },
+                'implant_classification_result': implant_classification_results,
                 'timestamp': datetime.now()
             })
 
             return jsonify({
-                'message': 'X-ray 이미지 YOLO 처리 완료',
+                'message': 'X-ray 이미지 YOLO + 임플란트 분류 완료',
                 'inference_result_id': str(inserted_id),
                 'image_type': image_type,
                 'original_image_path': f"/images/original/{base_name}",
@@ -160,8 +176,9 @@ def upload_masked_image():
                 'model1_inference_result': {
                     'used_model': 'xray_detect_best.pt',
                     'predictions': yolo_predictions,
-                    'summary': summary_text  # ✅ 클라이언트 응답에도 포함
-                }
+                    'summary': summary_text
+                },
+                'implant_classification_result': implant_classification_results
             }), 200
 
         # ✅ 일반 이미지 처리
