@@ -45,6 +45,8 @@ os.makedirs(app.config['UPLOAD_FOLDER_ORIGINAL'], exist_ok=True)
 os.makedirs(app.config['PROCESSED_FOLDER_MODEL1'], exist_ok=True)
 os.makedirs(app.config['PROCESSED_FOLDER_MODEL2'], exist_ok=True)
 os.makedirs(app.config['PROCESSED_FOLDER_MODEL3'], exist_ok=True)
+os.makedirs(app.config['PROCESSED_FOLDER_XMODEL1'], exist_ok=True)
+os.makedirs(app.config['PROCESSED_FOLDER_XMODEL2'], exist_ok=True)
 
 # ✅ DB 초기화 및 Mongo 연결
 db.init_app(app)
