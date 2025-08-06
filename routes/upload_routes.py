@@ -184,7 +184,7 @@ def upload_masked_image():
         # ✅ 일반 이미지 처리
         t1 = time.perf_counter()
         processed_path_1 = os.path.join(processed_dir_1, base_name)
-        masked_image_1, lesion_points, backend_model_confidence, backend_model_name, disease_label = predict_overlayed_image(image)
+        masked_image_1, lesion_points, backend_model_confidence, backend_model_name, disease_label, disease_labels = predict_overlayed_image(image)
         masked_image_1.save(processed_path_1)
 
         t2 = time.perf_counter()
@@ -195,7 +195,7 @@ def upload_masked_image():
         t3 = time.perf_counter()
         processed_path_3 = os.path.join(processed_dir_3, base_name)
         tooth_number_predictor.predict_mask_and_overlay_only(image, processed_path_3)
-        tooth_info = tooth_number_predictor.get_main_class_info_json(image)
+        tooth_info_list = tooth_number_predictor.get_all_class_info_json(image)
 
         total_elapsed = time.perf_counter() - start_total
         upload_logger.info(f"[📸 전체 추론 완료] 총 시간: {int(total_elapsed * 1000)}ms (user_id={user_id})")
@@ -213,7 +213,8 @@ def upload_masked_image():
                 'lesion_points': lesion_points,
                 'confidence': backend_model_confidence,
                 'used_model': backend_model_name,
-                'label': disease_label
+                'label': disease_label,
+                'detected_labels': disease_labels    # ✅ 추가
             },
             'model2_image_path': f"/images/model2/{base_name}",
             'model2_inference_result': {
@@ -225,9 +226,7 @@ def upload_masked_image():
             'model3_image_path': f"/images/model3/{base_name}",
             'model3_inference_result': {
                 'message': 'model3 마스크 생성 완료',
-                'class_id': tooth_info['class_id'],
-                'confidence': tooth_info['confidence'],
-                'tooth_number_fdi': tooth_info['tooth_number_fdi']
+                'predicted_tooth_info': tooth_info_list  # ✅ list 그대로 저장
             },
             'timestamp': datetime.now()
         })
@@ -244,7 +243,8 @@ def upload_masked_image():
                 'lesion_points': lesion_points,
                 'confidence': backend_model_confidence,
                 'used_model': backend_model_name,
-                'label': disease_label
+                'label': disease_label,
+                'detected_labels': disease_labels    # ✅ 추가
             },
             'model2_image_path': f"/images/model2/{base_name}",
             'model2_inference_result': {
@@ -256,9 +256,7 @@ def upload_masked_image():
             'model3_image_path': f"/images/model3/{base_name}",
             'model3_inference_result': {
                 'message': 'model3 마스크 생성 완료',
-                'class_id': tooth_info['class_id'],
-                'confidence': tooth_info['confidence'],
-                'tooth_number_fdi': tooth_info['tooth_number_fdi']
+                'predicted_tooth_info': tooth_info_list  # ✅ list 그대로 저장
             }
         }), 200
 
