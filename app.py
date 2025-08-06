@@ -71,7 +71,9 @@ print(f"✅ 연결된 DB URI: {app.config['SQLALCHEMY_DATABASE_URI']}")
 os.makedirs(app.config['UPLOAD_FOLDER_ORIGINAL'], exist_ok=True)
 os.makedirs(app.config['PROCESSED_FOLDER_MODEL1'], exist_ok=True)
 os.makedirs(app.config['PROCESSED_FOLDER_MODEL2'], exist_ok=True)
-os.makedirs(app.config['PROCESSED_FOLDER_MODEL3'], exist_ok=True)
+#os.makedirs(app.config['PROCESSED_FOLDER_MODEL3'], exist_ok=True)
+os.makedirs(app.config['PROCESSED_FOLDER_MODEL3_1'], exist_ok=True)
+os.makedirs(app.config['PROCESSED_FOLDER_MODEL3_2'], exist_ok=True)
 
 # ✅ DB 초기화 및 Mongo 연결
 db.init_app(app)
@@ -136,4 +138,4 @@ def internal_error(error):
 
 # ✅ 실행
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=True, host='0.0.0.0', port=5000, threaded=True)

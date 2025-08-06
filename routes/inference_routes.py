@@ -48,9 +48,9 @@ def get_inference_results():
                 doc["model2_image_path"] = f"/images/model2/{filename}"
 
                 if doc.get("image_type") == "normal":
-                    doc["model3_image_path"] = f"/images/model3/{filename}"
+                    doc["model3_2_image_path"] = f"/images/model3_2/{filename}"
                 else:
-                    doc["model3_image_path"] = None
+                    doc["model3_2_image_path"] = None
 
             return jsonify(documents), 200
 
@@ -84,9 +84,9 @@ def get_inference_results():
                 doc["model2_image_path"] = f"/images/model2/{filename}"
 
                 if doc.get("image_type") == "normal":
-                    doc["model3_image_path"] = f"/images/model3/{filename}"
+                    doc["model3_2_image_path"] = f"/images/model3_2/{filename}"
                 else:
-                    doc["model3_image_path"] = None
+                    doc["model3_2_image_path"] = None
 
                 return jsonify(doc), 200
             else:

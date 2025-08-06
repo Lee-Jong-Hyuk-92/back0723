@@ -7,16 +7,16 @@ from flask import Blueprint, request, jsonify, current_app
 from werkzeug.utils import secure_filename
 from PIL import Image, ImageDraw, ImageFont
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from ai_model.predictor import predict_overlayed_image              # model1: 질병
-from ai_model import hygiene_predictor, tooth_number_predictor      # model2: 위생, model3: 치아번호
+from ai_model.predictor import predict_overlayed_image
+from ai_model import hygiene_predictor, tooth_number_predictor_1
 from models.model import MongoDBClient
 
+# 로거 설정
 upload_logger = logging.getLogger("upload_logger")
 upload_logger.setLevel(logging.INFO)
 log_dir = os.path.join(os.path.dirname(__file__), "..", "logs")
 os.makedirs(log_dir, exist_ok=True)
 log_path = os.path.join(log_dir, "inference_times.log")
-
 if not upload_logger.handlers:
     fh = logging.FileHandler(log_path, encoding='utf-8')
     formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
@@ -79,16 +79,13 @@ def upload_masked_image():
         upload_dir = current_app.config['UPLOAD_FOLDER_ORIGINAL']
         processed_dir_1 = current_app.config['PROCESSED_FOLDER_MODEL1']
         processed_dir_2 = current_app.config['PROCESSED_FOLDER_MODEL2']
-        processed_dir_3 = current_app.config['PROCESSED_FOLDER_MODEL3']
+        processed_dir_3_1 = current_app.config['PROCESSED_FOLDER_MODEL3_1']
+        processed_dir_3_2 = current_app.config['PROCESSED_FOLDER_MODEL3_2']
         xmodel1_dir = current_app.config['PROCESSED_FOLDER_XMODEL1']
         xmodel2_dir = current_app.config['PROCESSED_FOLDER_XMODEL2']
 
-        os.makedirs(upload_dir, exist_ok=True)
-        os.makedirs(processed_dir_1, exist_ok=True)
-        os.makedirs(processed_dir_2, exist_ok=True)
-        os.makedirs(processed_dir_3, exist_ok=True)
-        os.makedirs(xmodel1_dir, exist_ok=True)
-        os.makedirs(xmodel2_dir, exist_ok=True)
+        for d in [upload_dir, processed_dir_1, processed_dir_2, processed_dir_3_1, processed_dir_3_2, xmodel1_dir, xmodel2_dir]:
+            os.makedirs(d, exist_ok=True)
 
         original_path = os.path.join(upload_dir, base_name)
         file.save(original_path)
@@ -106,22 +103,16 @@ def upload_masked_image():
 
             font_path = "C:/Windows/Fonts/malgun.ttf"
             font = ImageFont.truetype(font_path, 18)
-
             image_draw = image.copy()
             draw = ImageDraw.Draw(image_draw)
-
             for det in filtered_boxes:
                 x1, y1, x2, y2 = map(int, det['bbox'])
                 label = f"{det['class_name']} {det['confidence']:.2f}"
                 draw.rectangle([x1, y1, x2, y2], outline="blue", width=2)
                 draw.text((x1, y1 - 20), label, font=font, fill="blue")
 
-            processed_path_x1 = os.path.join(xmodel1_dir, base_name)
-            image_draw.save(processed_path_x1)
-
-            processed_path_x2 = os.path.join(xmodel2_dir, base_name)
-            empty_image = Image.new('RGB', image.size, color=(255, 255, 255))
-            empty_image.save(processed_path_x2)
+            image_draw.save(os.path.join(xmodel1_dir, base_name))
+            Image.new('RGB', image.size, color=(255, 255, 255)).save(os.path.join(xmodel2_dir, base_name))
 
             yolo_predictions = [{
                 "class_id": det['class_id'],
@@ -148,7 +139,6 @@ def upload_masked_image():
             return jsonify({
                 'message': 'X-ray 이미지 YOLO 처리 완료',
                 'inference_result_id': str(inserted_id),
-                'image_type': image_type,  # ✅ 추가됨
                 'original_image_path': f"/images/original/{base_name}",
                 'model1_image_path': f"/images/xmodel1/{base_name}",
                 'model2_image_path': f"/images/xmodel2/{base_name}",
@@ -158,25 +148,33 @@ def upload_masked_image():
                 }
             }), 200
 
-        # ✅ 일반 이미지 처리
-        t1 = time.perf_counter()
+        # ✅ model1: 질병
         processed_path_1 = os.path.join(processed_dir_1, base_name)
         masked_image_1, lesion_points, backend_model_confidence, backend_model_name, disease_label = predict_overlayed_image(image)
         masked_image_1.save(processed_path_1)
+        upload_logger.info("[🧠 모델1] 질병 세그멘테이션 완료")
 
-        t2 = time.perf_counter()
+        # ✅ model2: 위생
         processed_path_2 = os.path.join(processed_dir_2, base_name)
         hygiene_predictor.predict_mask_and_overlay_only(image, processed_path_2)
         hygiene_class_id, hygiene_conf, hygiene_label = hygiene_predictor.get_main_class_and_confidence_and_label(image)
+        upload_logger.info("[🧠 모델2] 위생 세그멘테이션 완료")
 
-        t3 = time.perf_counter()
-        processed_path_3 = os.path.join(processed_dir_3, base_name)
-        tooth_number_predictor.predict_mask_and_overlay_only(image, processed_path_3)
-        tooth_info = tooth_number_predictor.get_main_class_info_json(image)
+        # ✅ model3: 치아 번호
+        model3_results = tooth_number_predictor_1.run_yolo_segmentation(original_path)
+        diagnosis_summary = model3_results.get("diagnosis_summary", [])
+        predictions = model3_results.get("predictions", [])
+        model3_1_message = model3_results.get("model3_1_message", "model3_1 마스크 생성 완료")
+        model3_1_path = model3_results.get("model3_1_path", "")
+        model3_2_path = model3_results.get("model3_2_path", "")
+        upload_logger.info("[🧠 모델3] 치아번호 및 병변 병합 세그멘테이션 완료")
 
-        total_elapsed = time.perf_counter() - start_total
-        upload_logger.info(f"[📸 전체 추론 완료] 총 시간: {int(total_elapsed * 1000)}ms (user_id={user_id})")
+        # ✅ 안전한 상대경로 처리
+        static_root = current_app.config.get("STATIC_ROOT", "")
+        model3_1_relpath = model3_1_path.replace(static_root, "") if static_root and model3_1_path else f"/images/model3_1/{base_name}"
+        model3_2_relpath = model3_2_path.replace(static_root, "") if static_root and model3_2_path else f"/images/model3_2/{base_name}"
 
+        # ✅ MongoDB 저장
         mongo_client = MongoDBClient()
         inserted_id = mongo_client.insert_result({
             'user_id': user_id,
@@ -199,12 +197,15 @@ def upload_masked_image():
                 'confidence': hygiene_conf,
                 'label': hygiene_label
             },
-            'model3_image_path': f"/images/model3/{base_name}",
-            'model3_inference_result': {
+            'model3_1_image_path': model3_1_relpath,
+            'model3_1_inference_result': {
+                'message': model3_1_message
+            },
+            'model3_2_image_path': model3_2_relpath,
+            'model3_2_inference_result': {
                 'message': 'model3 마스크 생성 완료',
-                'class_id': tooth_info['class_id'],
-                'confidence': tooth_info['confidence'],
-                'tooth_number_fdi': tooth_info['tooth_number_fdi']
+                'diagnosis_summary': diagnosis_summary,
+                'predictions': predictions
             },
             'timestamp': datetime.now()
         })
@@ -212,7 +213,6 @@ def upload_masked_image():
         return jsonify({
             'message': '3개 모델 처리 및 저장 완료',
             'inference_result_id': str(inserted_id),
-            'image_type': image_type,  # ✅ 추가됨
             'original_image_path': f"/images/original/{base_name}",
             'original_image_yolo_detections': yolo_inference_data,
             'model1_image_path': f"/images/model1/{base_name}",
@@ -230,14 +230,18 @@ def upload_masked_image():
                 'confidence': hygiene_conf,
                 'label': hygiene_label
             },
-            'model3_image_path': f"/images/model3/{base_name}",
-            'model3_inference_result': {
+            'model3_1_image_path': model3_1_relpath,
+            'model3_1_inference_result': {
+                'message': model3_1_message
+            },
+            'model3_2_image_path': model3_2_relpath,
+            'model3_2_inference_result': {
                 'message': 'model3 마스크 생성 완료',
-                'class_id': tooth_info['class_id'],
-                'confidence': tooth_info['confidence'],
-                'tooth_number_fdi': tooth_info['tooth_number_fdi']
+                'diagnosis_summary': diagnosis_summary,
+                'predictions': predictions
             }
         }), 200
 
     except Exception as e:
+        upload_logger.exception("서버 처리 중 오류 발생")
         return jsonify({'error': f'서버 처리 중 오류: {str(e)}'}), 500

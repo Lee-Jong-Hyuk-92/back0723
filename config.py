@@ -25,11 +25,15 @@ class DevelopmentConfig:
     # ✅ 이미지 저장 경로 (images 하위로 정리)
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # ✅ 현재 파일 기준으로 고정
     IMAGE_BASE_DIR = os.path.join(BASE_DIR, 'images')
-
+    
+    
+    YOLO_MODEL_PATH = os.path.join(BASE_DIR, "ai_model", "best.pt")
     UPLOAD_FOLDER_ORIGINAL = os.path.join(IMAGE_BASE_DIR, 'original')
     PROCESSED_FOLDER_MODEL1 = os.path.join(IMAGE_BASE_DIR, 'model1')
     PROCESSED_FOLDER_MODEL2 = os.path.join(IMAGE_BASE_DIR, 'model2')
-    PROCESSED_FOLDER_MODEL3 = os.path.join(IMAGE_BASE_DIR, 'model3')
+    #PROCESSED_FOLDER_MODEL3 = os.path.join(IMAGE_BASE_DIR, 'model3')# ✅ 모델3 역할별로 명시적 분리
+    PROCESSED_FOLDER_MODEL3_1 = os.path.join(IMAGE_BASE_DIR, 'model3_1')  # classID (병변 색상/번호)
+    PROCESSED_FOLDER_MODEL3_2 = os.path.join(IMAGE_BASE_DIR, 'model3_2')  # tooth mask + 병변 병합
     PROCESSED_FOLDER_XMODEL1 = os.path.join(IMAGE_BASE_DIR, 'xmodel1')
     PROCESSED_FOLDER_XMODEL2 = os.path.join(IMAGE_BASE_DIR, 'xmodel2')
 
