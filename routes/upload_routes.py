@@ -180,21 +180,37 @@ def upload_masked_image():
                 },
                 'implant_classification_result': implant_classification_results
             }), 200
-
+        
         # ✅ 일반 이미지 처리
+        upload_logger.info(f"[DEBUG] 원본 이미지 크기: {image.size}, 모드: {image.mode}")
+
         t1 = time.perf_counter()
         processed_path_1 = os.path.join(processed_dir_1, base_name)
         masked_image_1, lesion_points, backend_model_confidence, backend_model_name, disease_label, disease_labels = predict_overlayed_image(image)
+        upload_logger.info(f"[DEBUG] model1 결과 크기: {masked_image_1.size}, 모드: {masked_image_1.mode}")
         masked_image_1.save(processed_path_1)
 
         t2 = time.perf_counter()
         processed_path_2 = os.path.join(processed_dir_2, base_name)
         hygiene_predictor.predict_mask_and_overlay_only(image, processed_path_2)
+        try:
+            # model2 저장된 이미지 크기 확인
+            img_model2 = Image.open(processed_path_2)
+            upload_logger.info(f"[DEBUG] model2 저장 이미지 크기: {img_model2.size}, 모드: {img_model2.mode}")
+            img_model2.close()
+        except Exception as e:
+            upload_logger.warning(f"[DEBUG] model2 이미지 크기 확인 실패: {e}")
         hygiene_class_id, hygiene_conf, hygiene_label = hygiene_predictor.get_main_class_and_confidence_and_label(image)
 
         t3 = time.perf_counter()
         processed_path_3 = os.path.join(processed_dir_3, base_name)
         tooth_number_predictor.predict_mask_and_overlay_only(image, processed_path_3)
+        try:
+            img_model3 = Image.open(processed_path_3)
+            upload_logger.info(f"[DEBUG] model3 저장 이미지 크기: {img_model3.size}, 모드: {img_model3.mode}")
+            img_model3.close()
+        except Exception as e:
+            upload_logger.warning(f"[DEBUG] model3 이미지 크기 확인 실패: {e}")
         tooth_info_list = tooth_number_predictor.get_all_class_info_json(image)
 
         total_elapsed = time.perf_counter() - start_total
@@ -261,4 +277,5 @@ def upload_masked_image():
         }), 200
 
     except Exception as e:
+        upload_logger.exception("Upload error")  # <-- 전체 스택 로그
         return jsonify({'error': f'서버 처리 중 오류: {str(e)}'}), 500

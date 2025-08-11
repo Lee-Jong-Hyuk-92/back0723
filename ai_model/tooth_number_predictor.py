@@ -26,7 +26,8 @@ def predict_mask_and_overlay_only(pil_img, overlay_save_path):
         print("❌ 예측 결과 없음")
         return None
 
-    overlay_img = Image.fromarray(result.plot())  # numpy → PIL
+    # YOLO 출력 이미지를 PIL로 변환 후 원본 크기로 맞춤
+    overlay_img = Image.fromarray(result.plot()).resize(pil_img.size, Image.NEAREST)
     overlay_img.save(overlay_save_path, format="PNG")
     return overlay_img
 

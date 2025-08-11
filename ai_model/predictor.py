@@ -1,92 +1,91 @@
 import os
-import torch
-import torchvision.transforms as T
-from PIL import Image
+from PIL import Image, ImageDraw
 import numpy as np
-import segmentation_models_pytorch as smp
+import torch
+from ultralytics import YOLO
+from ultralytics.data.augment import LetterBox
+from ultralytics.utils.ops import scale_masks
 from typing import Tuple, List
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# ✅ 모델 로드
+MODEL_PATH = os.path.join(os.path.dirname(__file__), 'disease0728_best.pt')
+model = YOLO(MODEL_PATH)
 
-DISEASE_CLASS_MAP = {
-    1: "충치 초기", 2: "충치 중기", 3: "충치 말기",
-    4: "잇몸 염증 초기", 5: "잇몸 염증 중기", 6: "잇몸 염증 말기", # 치은염
-    7: "치주질환 초기", 8: "치주질환 중기", 9: "치주질환 말기"  # 치주염, 치은염이 심해진것, 잇몸 염증 + 잇몸 뼈 염증
+# ✅ 클래스 이름 (YOLO class index 기준)
+YOLO_CLASS_MAP = {
+    0: "충치 초기",
+    1: "충치 중기",
+    2: "충치 말기",
+    3: "잇몸 염증 초기",
+    4: "잇몸 염증 중기",
+    5: "잇몸 염증 말기",
+    6: "치주질환 초기",
+    7: "치주질환 중기",
+    8: "치주질환 말기"
 }
 
-n_labels = 10
-model = smp.UnetPlusPlus(
-    encoder_name='efficientnet-b7',
-    encoder_weights='imagenet',
-    classes=n_labels,
-    activation=None
-)
-model_path = os.path.join(os.path.dirname(__file__), 'disease_model_saved_weight.pt')
-model.load_state_dict(torch.load(model_path, map_location=device))
-model.to(device)
-model.eval()
-
-BACKEND_MODEL_NAME = os.path.basename(model_path)
-
-transform = T.Compose([
-    T.Resize((224, 224)),
-    T.ToTensor(),
-])
-
+# ✅ 색상 팔레트 (CLI 결과와 동일)
 PALETTE = {
-    0: (0, 0, 0, 0),        # background - 완전 투명
-    1: (255, 0, 0, 180),
-    2: (0, 255, 0, 180),
-    3: (0, 0, 255, 180),
-    4: (255, 255, 0, 180),
-    5: (255, 0, 255, 180),
-    6: (0, 255, 255, 180),
-    7: (255, 165, 0, 180),
-    8: (128, 0, 128, 180),
-    9: (128, 128, 128, 180),
+    0: (255, 0, 0, 128),
+    1: (0, 255, 0, 128),
+    2: (0, 0, 255, 128),
+    3: (255, 255, 0, 128),
+    4: (255, 0, 255, 128),
+    5: (0, 255, 255, 128),
+    6: (255, 165, 0, 128),
+    7: (128, 0, 128, 128),
+    8: (128, 128, 128, 128),
 }
 
-def predict_overlayed_image(pil_img: Image.Image) -> Tuple[Image.Image, List[List[int]], float, str, str]:
-    original_img_resized = pil_img.resize((224, 224)).convert('RGBA')  # ✅ RGBA로 변환
-    input_tensor = transform(pil_img).unsqueeze(0).to(device)
+def predict_overlayed_image(pil_img: Image.Image):
+    orig_w, orig_h = pil_img.size
+    img_np = np.array(pil_img.convert("RGB"))
 
-    with torch.no_grad():
-        output_logits = model(input_tensor)
-        output_logits_np = output_logits.squeeze(0).cpu().numpy()
-        probabilities = torch.softmax(torch.from_numpy(output_logits_np), dim=0).numpy()
-        pred_mask = np.argmax(output_logits_np, axis=0)
+    # ✅ CLI와 동일한 LetterBox 전처리
+    lb = LetterBox(new_shape=(640, 640))
+    img_lb = lb(image=img_np)
+    img_tensor = torch.from_numpy(img_lb).permute(2, 0, 1).float().unsqueeze(0) / 255.0
 
-    # ✅ RGBA 마스크 생성
-    color_mask = np.zeros((224, 224, 4), dtype=np.uint8)
-    for class_id, color in PALETTE.items():
-        color_mask[pred_mask == class_id] = color
-    color_mask_img = Image.fromarray(color_mask, mode='RGBA')
+    # ✅ 추론
+    results = model(img_tensor, verbose=False)
+    r = results[0]
 
-    # ✅ 이미지 합성 (alpha_composite)
-    overlay = Image.alpha_composite(original_img_resized, color_mask_img)
+    # ✅ 마스크 복원
+    if r.masks is not None:
+        masks_data = r.masks.data
+        if masks_data.ndim == 3:  # [N, H, W] → [N, 1, H, W]
+            masks_data = masks_data[:, None, :, :]
+        r.masks.data = scale_masks(masks_data, (orig_h, orig_w))
 
-    lesion_coords = np.column_stack(np.where(pred_mask > 0))
-    lesion_points = lesion_coords.tolist()
+    # ✅ 탐지 없으면 원본 반환
+    if r.masks is None or len(r.boxes.cls) == 0:
+        return pil_img.copy(), [], 0.0, os.path.basename(MODEL_PATH), "감지되지 않음", []
 
-    backend_model_confidence = 0.0
-    if lesion_coords.shape[0] > 0:
-        lesion_pixel_confidences = [
-            probabilities[pred_mask[y, x], y, x]
-            for y, x in lesion_coords if pred_mask[y, x] > 0
-        ]
-        if lesion_pixel_confidences:
-            backend_model_confidence = np.mean(lesion_pixel_confidences)
+    # ✅ 마스크 그리기
+    overlay_img = pil_img.convert("RGBA")
+    for seg, cls_t in zip(r.masks.data.squeeze(1), r.boxes.cls):
+        cls_id = int(cls_t.item())
+        color = PALETTE.get(cls_id, (255, 255, 255, 128))
+        mask = seg.cpu().numpy()
+        mask_img = Image.fromarray((mask * 255).astype(np.uint8)).resize((orig_w, orig_h), Image.NEAREST)
+        color_layer = Image.new("RGBA", (orig_w, orig_h), color)
+        overlay_img = Image.alpha_composite(overlay_img, Image.composite(color_layer, Image.new("RGBA", (orig_w, orig_h)), mask_img))
 
-    # ✅ 추가: 등장한 class들을 set으로 추출
-    lesion_labels = pred_mask[pred_mask > 0]
-    detected_class_ids = sorted(list(set(lesion_labels.tolist())))
-    detected_labels = [DISEASE_CLASS_MAP.get(cid, "Unknown") for cid in detected_class_ids]
+    # ✅ 클래스명 / 박스 중심
+    detected_classes = r.boxes.cls.tolist()
+    detected_class_names = [YOLO_CLASS_MAP.get(int(c), "Unknown") for c in detected_classes]
 
-    # ✅ 가장 많이 나온 클래스만 따로 지정
-    if len(lesion_labels) > 0:
-        most_common_class = np.bincount(lesion_labels).argmax()
-        main_class_label = DISEASE_CLASS_MAP.get(most_common_class, "알 수 없음")
-    else:
-        main_class_label = "감지되지 않음"
+    box_centers = []
+    for box in r.boxes.xyxy:
+        x1, y1, x2, y2 = box.tolist()
+        cx, cy = int((x1 + x2) / 2), int((y1 + y2) / 2)
+        box_centers.append([cx, cy])
 
-    return overlay, lesion_points, float(backend_model_confidence), BACKEND_MODEL_NAME, main_class_label, detected_labels
+    return (
+        overlay_img.convert("RGB"),
+        box_centers,
+        float(r.boxes.conf.mean().item()) if r.boxes is not None else 0.0,
+        os.path.basename(MODEL_PATH),
+        detected_class_names[0] if detected_class_names else "감지되지 않음",
+        detected_class_names
+    )

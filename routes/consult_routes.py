@@ -100,8 +100,6 @@ def get_consult_status():
         'is_replied': 'N'
     }), 200
 
-
-
 # ✅ 4. 의사 응답
 @consult_bp.route('/reply', methods=['POST'])
 def doctor_reply():
