@@ -1,11 +1,10 @@
 import os
-from PIL import Image, ImageDraw
+from PIL import Image
 import numpy as np
 import torch
 from ultralytics import YOLO
 from ultralytics.data.augment import LetterBox
 from ultralytics.utils.ops import scale_masks
-from typing import Tuple, List
 
 # ✅ 모델 로드
 MODEL_PATH = os.path.join(os.path.dirname(__file__), 'disease0728_best.pt')
@@ -24,17 +23,17 @@ YOLO_CLASS_MAP = {
     8: "치주질환 말기"
 }
 
-# ✅ 색상 팔레트 (CLI 결과와 동일)
+# ✅ 색상 팔레트 (클래스별 RGBA)
 PALETTE = {
-    0: (255, 0, 0, 128),
-    1: (0, 255, 0, 128),
-    2: (0, 0, 255, 128),
-    3: (255, 255, 0, 128),
-    4: (255, 0, 255, 128),
-    5: (0, 255, 255, 128),
-    6: (255, 165, 0, 128),
-    7: (128, 0, 128, 128),
-    8: (128, 128, 128, 128),
+    0: (255, 0, 0, 220),       # 🔴 빨강
+    1: (255, 255, 0, 220),     # 🟡 노랑
+    2: (255, 165, 0, 220),     # 🟠 주황
+    3: (0, 0, 255, 220),       # 🔵 파랑
+    4: (0, 128, 0, 220),       # 🟢 초록
+    5: (255, 255, 255, 220),   # ⚪ 흰색
+    6: (0, 0, 0, 220),         # ⚫ 검은색
+    7: (144, 238, 144, 220),   # 🟩 연두
+    8: (128, 0, 128, 220),     # 🟣 보라
 }
 
 def predict_overlayed_image(pil_img: Image.Image):
@@ -50,6 +49,10 @@ def predict_overlayed_image(pil_img: Image.Image):
     results = model(img_tensor, verbose=False)
     r = results[0]
 
+    # ✅ 탐지 없으면 원본 반환
+    if r.masks is None or len(r.boxes.cls) == 0:
+        return pil_img.copy(), [], 0.0, os.path.basename(MODEL_PATH), "감지되지 않음", []
+
     # ✅ 마스크 복원
     if r.masks is not None:
         masks_data = r.masks.data
@@ -57,21 +60,22 @@ def predict_overlayed_image(pil_img: Image.Image):
             masks_data = masks_data[:, None, :, :]
         r.masks.data = scale_masks(masks_data, (orig_h, orig_w))
 
-    # ✅ 탐지 없으면 원본 반환
-    if r.masks is None or len(r.boxes.cls) == 0:
-        return pil_img.copy(), [], 0.0, os.path.basename(MODEL_PATH), "감지되지 않음", []
-
-    # ✅ 마스크 그리기
+    # ✅ 원본 RGBA 복사
     overlay_img = pil_img.convert("RGBA")
+
+    # ✅ 각 마스크를 해당 색상으로만 반투명 덮기
     for seg, cls_t in zip(r.masks.data.squeeze(1), r.boxes.cls):
         cls_id = int(cls_t.item())
-        color = PALETTE.get(cls_id, (255, 255, 255, 128))
+        color = PALETTE.get(cls_id, (255, 255, 255, 128))  # 기본 흰색
         mask = seg.cpu().numpy()
-        mask_img = Image.fromarray((mask * 255).astype(np.uint8)).resize((orig_w, orig_h), Image.NEAREST)
+        mask_img = Image.fromarray((mask * 255).astype(np.uint8))
         color_layer = Image.new("RGBA", (orig_w, orig_h), color)
-        overlay_img = Image.alpha_composite(overlay_img, Image.composite(color_layer, Image.new("RGBA", (orig_w, orig_h)), mask_img))
+        overlay_img = Image.alpha_composite(
+            overlay_img,
+            Image.composite(color_layer, Image.new("RGBA", (orig_w, orig_h)), mask_img)
+        )
 
-    # ✅ 클래스명 / 박스 중심
+    # ✅ 클래스명 / 박스 중심 계산
     detected_classes = r.boxes.cls.tolist()
     detected_class_names = [YOLO_CLASS_MAP.get(int(c), "Unknown") for c in detected_classes]
 

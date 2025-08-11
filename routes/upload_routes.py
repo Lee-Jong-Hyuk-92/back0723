@@ -98,7 +98,7 @@ def upload_masked_image():
         if image.mode != "RGB":
             image = image.convert("RGB")
 
-        # ✅ YOLO 탐지 후 임플란트 분류까지 포함된 X-ray 처리 블록
+        # X-ray 처리
         if image_type == 'xray':
             from ai_model.xray_detector import detect_xray
             from ai_model.predict_implant_manufacturer import classify_implants_from_xray
@@ -118,11 +118,9 @@ def upload_masked_image():
                 } for det in filtered_boxes
             ]
 
-            # ✅ 임플란트 분류 먼저 수행
             implant_classification_results = classify_implants_from_xray(original_path)
             upload_logger.info(f"[🏷️ 임플란트 분류] {len(implant_classification_results)}개 결과 생성")
 
-            # ✅ xmodel1 YOLO 박스 오버레이 저장
             image_draw = image.copy()
             draw = ImageDraw.Draw(image_draw)
             font_path = "C:/Windows/Fonts/malgun.ttf"
@@ -135,7 +133,6 @@ def upload_masked_image():
             processed_path_x1 = os.path.join(xmodel1_dir, base_name)
             image_draw.save(processed_path_x1)
 
-            # ✅ xmodel2 임플란트 제조사 분류 오버레이 저장
             image_with_manufacturer = image.copy()
             draw = ImageDraw.Draw(image_with_manufacturer)
             for result in implant_classification_results:
@@ -148,7 +145,6 @@ def upload_masked_image():
             processed_path_x2 = os.path.join(xmodel2_dir, base_name)
             image_with_manufacturer.save(processed_path_x2)
 
-            # ✅ 결과 저장 및 응답
             mongo_client = MongoDBClient()
             inserted_id = mongo_client.insert_result({
                 'user_id': user_id,
@@ -180,26 +176,25 @@ def upload_masked_image():
                 },
                 'implant_classification_result': implant_classification_results
             }), 200
-        
-        # ✅ 일반 이미지 처리
-        upload_logger.info(f"[DEBUG] 원본 이미지 크기: {image.size}, 모드: {image.mode}")
+
+        # 일반 이미지 처리
+        #upload_logger.info(f"[DEBUG] 원본 이미지 크기: {image.size}, 모드: {image.mode}")
 
         t1 = time.perf_counter()
         processed_path_1 = os.path.join(processed_dir_1, base_name)
         masked_image_1, lesion_points, backend_model_confidence, backend_model_name, disease_label, disease_labels = predict_overlayed_image(image)
-        upload_logger.info(f"[DEBUG] model1 결과 크기: {masked_image_1.size}, 모드: {masked_image_1.mode}")
         masked_image_1.save(processed_path_1)
 
         t2 = time.perf_counter()
         processed_path_2 = os.path.join(processed_dir_2, base_name)
-        hygiene_predictor.predict_mask_and_overlay_only(image, processed_path_2)
+        masked_image_2, detected_classes_all, hygiene_confidence, hygiene_model_name, hygiene_main_label, hygiene_detected_labels = hygiene_predictor.predict_mask_and_overlay_with_all(image, processed_path_2)
         try:
-            # model2 저장된 이미지 크기 확인
             img_model2 = Image.open(processed_path_2)
-            upload_logger.info(f"[DEBUG] model2 저장 이미지 크기: {img_model2.size}, 모드: {img_model2.mode}")
+            #upload_logger.info(f"[DEBUG] model2 저장 이미지 크기: {img_model2.size}, 모드: {img_model2.mode}")
             img_model2.close()
         except Exception as e:
             upload_logger.warning(f"[DEBUG] model2 이미지 크기 확인 실패: {e}")
+
         hygiene_class_id, hygiene_conf, hygiene_label = hygiene_predictor.get_main_class_and_confidence_and_label(image)
 
         t3 = time.perf_counter()
@@ -207,7 +202,7 @@ def upload_masked_image():
         tooth_number_predictor.predict_mask_and_overlay_only(image, processed_path_3)
         try:
             img_model3 = Image.open(processed_path_3)
-            upload_logger.info(f"[DEBUG] model3 저장 이미지 크기: {img_model3.size}, 모드: {img_model3.mode}")
+            #upload_logger.info(f"[DEBUG] model3 저장 이미지 크기: {img_model3.size}, 모드: {img_model3.mode}")
             img_model3.close()
         except Exception as e:
             upload_logger.warning(f"[DEBUG] model3 이미지 크기 확인 실패: {e}")
@@ -230,19 +225,20 @@ def upload_masked_image():
                 'confidence': backend_model_confidence,
                 'used_model': backend_model_name,
                 'label': disease_label,
-                'detected_labels': disease_labels    # ✅ 추가
+                'detected_labels': disease_labels
             },
             'model2_image_path': f"/images/model2/{base_name}",
             'model2_inference_result': {
                 'message': 'model2 마스크 생성 완료',
                 'class_id': hygiene_class_id,
-                'confidence': hygiene_conf,
-                'label': hygiene_label
+                'confidence': hygiene_confidence,
+                'label': hygiene_main_label,
+                'detected_labels': hygiene_detected_labels
             },
             'model3_image_path': f"/images/model3/{base_name}",
             'model3_inference_result': {
                 'message': 'model3 마스크 생성 완료',
-                'predicted_tooth_info': tooth_info_list  # ✅ list 그대로 저장
+                'predicted_tooth_info': tooth_info_list
             },
             'timestamp': datetime.now()
         })
@@ -250,7 +246,7 @@ def upload_masked_image():
         return jsonify({
             'message': '3개 모델 처리 및 저장 완료',
             'inference_result_id': str(inserted_id),
-            'image_type': image_type,  # ✅ 추가됨
+            'image_type': image_type,
             'original_image_path': f"/images/original/{base_name}",
             'original_image_yolo_detections': yolo_inference_data,
             'model1_image_path': f"/images/model1/{base_name}",
@@ -260,22 +256,23 @@ def upload_masked_image():
                 'confidence': backend_model_confidence,
                 'used_model': backend_model_name,
                 'label': disease_label,
-                'detected_labels': disease_labels    # ✅ 추가
+                'detected_labels': disease_labels
             },
             'model2_image_path': f"/images/model2/{base_name}",
             'model2_inference_result': {
                 'message': 'model2 마스크 생성 완료',
                 'class_id': hygiene_class_id,
-                'confidence': hygiene_conf,
-                'label': hygiene_label
+                'confidence': hygiene_confidence,
+                'label': hygiene_main_label,
+                'detected_labels': hygiene_detected_labels
             },
             'model3_image_path': f"/images/model3/{base_name}",
             'model3_inference_result': {
                 'message': 'model3 마스크 생성 완료',
-                'predicted_tooth_info': tooth_info_list  # ✅ list 그대로 저장
+                'predicted_tooth_info': tooth_info_list
             }
         }), 200
 
     except Exception as e:
-        upload_logger.exception("Upload error")  # <-- 전체 스택 로그
+        upload_logger.exception("Upload error")
         return jsonify({'error': f'서버 처리 중 오류: {str(e)}'}), 500
