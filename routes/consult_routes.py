@@ -73,7 +73,6 @@ def cancel_consult():
 
     return jsonify({'error': 'Cannot cancel this request'}), 400
 
-
 # ✅ 3. 특정 이미지에 대한 신청 상태 조회
 @consult_bp.route('/status', methods=['GET'])
 def get_consult_status():
@@ -94,7 +93,7 @@ def get_consult_status():
             'is_replied': consult.is_replied
         }), 200
 
-    print(f"[CONSULT STATUS] user_id={user_id}, image_path={image_path} -> 신청 기록 없음")
+    # print(f"[CONSULT STATUS] user_id={user_id}, image_path={image_path} -> 신청 기록 없음")
     return jsonify({
         'is_requested': 'N',
         'is_replied': 'N'
@@ -259,5 +258,32 @@ def today_status_counts():
             'completed': completed,
             'canceled': canceled
         }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ✅ 최근 7일 신청 건수 API
+@consult_bp.route('/recent-7-days', methods=['GET'])
+def recent_7_days():
+    try:
+        today = datetime.now().date()
+        start_date = today - timedelta(days=6)  # 오늘 포함 7일 전
+
+        results = []
+        for i in range(7):
+            day = start_date + timedelta(days=i)
+            start = datetime.combine(day, datetime.min.time())
+            end = datetime.combine(day, datetime.max.time())
+
+            count = ConsultRequest.query.filter(
+                ConsultRequest.request_datetime >= start,
+                ConsultRequest.request_datetime <= end
+            ).count()
+
+            results.append({
+                'date': day.strftime('%Y-%m-%d'),
+                'count': count
+            })
+
+        return jsonify({'data': results}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
