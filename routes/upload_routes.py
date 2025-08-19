@@ -10,7 +10,6 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from ai_model.predictor import predict_overlayed_image              # model1: 질병
 from ai_model import hygiene_predictor, tooth_number_predictor      # model2: 위생, model3: 치아번호
 from models.model import MongoDBClient
-from PIL import ImageDraw, ImageFont
 
 try:
     import torch
@@ -20,7 +19,7 @@ try:
 except Exception:
     def _sync_cuda():
         pass
-    
+
 upload_logger = logging.getLogger("upload_logger")
 upload_logger.setLevel(logging.INFO)
 log_dir = os.path.join(os.path.dirname(__file__), "..", "logs")
@@ -37,6 +36,19 @@ upload_bp = Blueprint('upload', __name__)
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in current_app.config['ALLOWED_EXTENSIONS']
+
+def _load_font(size: int = 18):
+    """플랫폼별 한글 폰트 폴백."""
+    try:
+        if os.name == "nt" and os.path.exists("C:/Windows/Fonts/malgun.ttf"):
+            return ImageFont.truetype("C:/Windows/Fonts/malgun.ttf", size)
+        if os.path.exists("/mnt/c/Windows/Fonts/malgun.ttf"):
+            return ImageFont.truetype("/mnt/c/Windows/Fonts/malgun.ttf", size)
+        if os.path.exists("/usr/share/fonts/truetype/nanum/NanumGothic.ttf"):
+            return ImageFont.truetype("/usr/share/fonts/truetype/nanum/NanumGothic.ttf", size)
+    except Exception:
+        pass
+    return ImageFont.load_default()
 
 @upload_bp.route('/upload_image', methods=['POST'])
 @jwt_required()
@@ -107,12 +119,11 @@ def upload_masked_image():
         if image.mode != "RGB":
             image = image.convert("RGB")
 
-        # X-ray 처리
+        # ───────────────────────────── X-ray 처리 ─────────────────────────────
         if image_type == 'xray':
             from ai_model.xray_detector import detect_xray
             from ai_model.predict_implant_manufacturer import classify_implants_from_xray
 
-            # --- X-ray 탐지 시간 ---
             detect_start = time.perf_counter()
             detect_result = detect_xray(original_path)
             _sync_cuda()
@@ -130,13 +141,11 @@ def upload_masked_image():
                 } for det in filtered_boxes
             ]
 
-            # --- 임플란트 분류 시간 ---
             impl_start = time.perf_counter()
             implant_classification_results = classify_implants_from_xray(original_path)
             _sync_cuda()
             impl_elapsed = int((time.perf_counter() - impl_start) * 1000)
 
-            # --- 전체 시간 ---
             total_elapsed = int((time.perf_counter() - start_total) * 1000)
             upload_logger.info(
                 f"[📸 추론 완료] 총 {total_elapsed}ms "
@@ -145,13 +154,12 @@ def upload_masked_image():
 
             image_draw = image.copy()
             draw = ImageDraw.Draw(image_draw)
-            font_path = "C:/Windows/Fonts/malgun.ttf"
-            font = ImageFont.truetype(font_path, 18)
+            font = _load_font(18)
             for det in filtered_boxes:
                 x1, y1, x2, y2 = map(int, det['bbox'])
                 label = f"{det['class_name']} {det['confidence']:.2f}"
                 draw.rectangle([x1, y1, x2, y2], outline="blue", width=2)
-                draw.text((x1, y1 - 20), label, font=font, fill="blue")
+                draw.text((x1, max(y1 - 20, 0)), label, font=font, fill="blue")
             processed_path_x1 = os.path.join(xmodel1_dir, base_name)
             image_draw.save(processed_path_x1)
 
@@ -163,7 +171,7 @@ def upload_masked_image():
                 conf = result['confidence'] * 100
                 label = f"{name} ({conf:.1f}%)"
                 draw.rectangle([x1, y1, x2, y2], outline="red", width=2)
-                draw.text((x1, y1 - 22), label, fill="yellow", font=font)
+                draw.text((x1, max(y1 - 22, 0)), label, fill="yellow", font=font)
             processed_path_x2 = os.path.join(xmodel2_dir, base_name)
             image_with_manufacturer.save(processed_path_x2)
 
@@ -199,37 +207,42 @@ def upload_masked_image():
                 'implant_classification_result': implant_classification_results
             }), 200
 
-        # 일반 이미지 처리
-        #upload_logger.info(f"[DEBUG] 원본 이미지 크기: {image.size}, 모드: {image.mode}")
-
+        # ─────────────────────────── 일반 이미지 처리 ───────────────────────────
         t1_start = time.perf_counter()
         processed_path_1 = os.path.join(processed_dir_1, base_name)
-        masked_image_1, lesion_points, backend_model_confidence, backend_model_name, disease_label, disease_labels = predict_overlayed_image(image)
-        masked_image_1.save(processed_path_1)
+        # ✅ 올바른 시그니처로 호출 (저장 경로 전달)
+        masked_image_1, lesion_points, backend_model_confidence, backend_model_name, disease_label, disease_labels = \
+            predict_overlayed_image(image, processed_path_1)
+        try:
+            masked_image_1.save(processed_path_1)   # 이미 저장됐어도 무해
+        except Exception:
+            pass
         t1_elapsed = int((time.perf_counter() - t1_start) * 1000)
 
         t2_start = time.perf_counter()
         processed_path_2 = os.path.join(processed_dir_2, base_name)
-        masked_image_2, detected_classes_all, hygiene_confidence, hygiene_model_name, hygiene_main_label, hygiene_detected_labels = hygiene_predictor.predict_mask_and_overlay_with_all(image, processed_path_2)
+        # ✅ 7개 언팩 (detections 추가)
+        (masked_image_2,
+         detected_classes_all,
+         hygiene_confidence,
+         hygiene_model_name,
+         hygiene_main_label,
+         hygiene_detected_labels,
+         hygiene_detections) = hygiene_predictor.predict_mask_and_overlay_with_all(image, processed_path_2)
         try:
-            img_model2 = Image.open(processed_path_2)
-            #upload_logger.info(f"[DEBUG] model2 저장 이미지 크기: {img_model2.size}, 모드: {img_model2.mode}")
-            img_model2.close()
+            Image.open(processed_path_2).close()
         except Exception as e:
-            upload_logger.warning(f"[DEBUG] model2 이미지 크기 확인 실패: {e}")
-
-        hygiene_class_id, hygiene_conf, hygiene_label = hygiene_predictor.get_main_class_and_confidence_and_label(image)
+            upload_logger.warning(f"[DEBUG] model2 이미지 확인 실패: {e}")
+        # ✅ 재추론 제거 (이미 위에서 main/avg/labels/detections 다 받음)
         t2_elapsed = int((time.perf_counter() - t2_start) * 1000)
 
         t3_start = time.perf_counter()
         processed_path_3 = os.path.join(processed_dir_3, base_name)
         tooth_number_predictor.predict_mask_and_overlay_only(image, processed_path_3)
         try:
-            img_model3 = Image.open(processed_path_3)
-            #upload_logger.info(f"[DEBUG] model3 저장 이미지 크기: {img_model3.size}, 모드: {img_model3.mode}")
-            img_model3.close()
+            Image.open(processed_path_3).close()
         except Exception as e:
-            upload_logger.warning(f"[DEBUG] model3 이미지 크기 확인 실패: {e}")
+            upload_logger.warning(f"[DEBUG] model3 이미지 확인 실패: {e}")
         tooth_info_list = tooth_number_predictor.get_all_class_info_json(image)
         t3_elapsed = int((time.perf_counter() - t3_start) * 1000)
 
@@ -259,10 +272,14 @@ def upload_masked_image():
             'model2_image_path': f"/images/model2/{base_name}",
             'model2_inference_result': {
                 'message': 'model2 마스크 생성 완료',
-                'class_id': hygiene_class_id,
-                'confidence': hygiene_confidence,
-                'label': hygiene_main_label,
-                'detected_labels': hygiene_detected_labels
+                # 프론트 호환 유지 필드
+                'class_id': None,
+                'confidence': hygiene_confidence,          # 평균
+                'label': hygiene_main_label,               # 대표
+                'detected_labels': hygiene_detected_labels,# 문자열 라벨 리스트(기존 호환)
+                # 새 필드: 개별 디텍션들(라벨+confidence+bbox)
+                'detections': hygiene_detections,
+                'used_model': hygiene_model_name
             },
             'model3_image_path': f"/images/model3/{base_name}",
             'model3_inference_result': {
@@ -290,10 +307,12 @@ def upload_masked_image():
             'model2_image_path': f"/images/model2/{base_name}",
             'model2_inference_result': {
                 'message': 'model2 마스크 생성 완료',
-                'class_id': hygiene_class_id,
+                'class_id': None,
                 'confidence': hygiene_confidence,
                 'label': hygiene_main_label,
-                'detected_labels': hygiene_detected_labels
+                'detected_labels': hygiene_detected_labels,
+                'detections': hygiene_detections,
+                'used_model': hygiene_model_name
             },
             'model3_image_path': f"/images/model3/{base_name}",
             'model3_inference_result': {
