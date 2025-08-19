@@ -1,11 +1,67 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
+from sqlalchemy import func
 from models.consult_model import ConsultRequest
 from models.model import db, User, Doctor
 from datetime import datetime, timedelta
 import json
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
+# ▶ 추가: Mongo 사용을 위해
+from pymongo import MongoClient
+import os
+
 consult_bp = Blueprint('consult', __name__)
+
+# 내부 유틸: birth 문자열(YYYY-MM-DD 또는 YYYYMMDD) → 나이 계산
+def _birth_to_age(birth_str):
+    if not birth_str:
+        return None
+    try:
+        # '1999-02-02' 또는 '19990202' 모두 처리 (앞 4자리 연도만 사용)
+        by = int(str(birth_str)[:4])
+        this_year = datetime.now().year
+        age = this_year - by
+        if 0 <= age <= 120:
+            return age
+    except Exception:
+        pass
+    return None
+
+# 내부 유틸: 'YYYYMMDD' 또는 'YYYY-MM-DD' → datetime.date
+def _parse_ymd(date_str: str):
+    if not date_str:
+        return None
+    try:
+        if '-' in date_str:
+            return datetime.strptime(date_str, '%Y-%m-%d').date()
+        return datetime.strptime(date_str, '%Y%m%d').date()
+    except Exception:
+        return None
+
+# ▶ 추가: MongoDB 컬렉션 핸들러
+def _get_mongo_collection():
+    uri = current_app.config.get('MONGO_URI')
+    dbname = current_app.config.get('MONGO_DB_NAME')
+    collname = current_app.config.get('MONGO_COLLECTION', 'uploads')
+    if not uri or not dbname:
+        raise RuntimeError('MongoDB is not configured (MONGO_URI / MONGO_DB_NAME).')
+    client = MongoClient(uri)
+    return client[dbname][collname]
+
+# ▶ 추가: 경로 정규화 유틸 (호스트 접두사 제거, 쿼리스트링 제거 등)
+def _normalize_path(p: str) -> str:
+    if not p:
+        return ''
+    # 쿼리/해시 제거
+    p = p.split('?', 1)[0].split('#', 1)[0]
+    # 내부 BASE URL 접두사 제거
+    base = (current_app.config.get('INTERNAL_BASE_URL') or '').rstrip('/')
+    if base and p.startswith(base):
+        p = p[len(base):]
+    # 슬래시 정리
+    if not p.startswith('/'):
+        p = '/' + p
+    return p
 
 # ✅ 1. 신청 등록
 @consult_bp.route('', methods=['POST'])
@@ -54,7 +110,7 @@ def create_consult():
 def cancel_consult():
     data = request.json
     user_id = data.get('user_id')
-    image_path = data.get('original_image_url')  # 👈 프론트에서 보내주는 상대 경로 그대로 사용
+    image_path = data.get('original_image_url')
 
     if not user_id or not image_path:
         return jsonify({'error': 'Missing parameters'}), 400
@@ -90,39 +146,56 @@ def get_consult_status():
         print(f"[CONSULT STATUS] user_id={user_id}, image_path={image_path} -> is_requested={consult.is_requested}, is_replied={consult.is_replied}")
         return jsonify({
             'is_requested': consult.is_requested,
-            'is_replied': consult.is_replied
+            'is_replied': consult.is_replied,
+            'request_id': consult.id,
+            'doctor_comment': consult.doctor_comment,
         }), 200
 
-    # print(f"[CONSULT STATUS] user_id={user_id}, image_path={image_path} -> 신청 기록 없음")
     return jsonify({
         'is_requested': 'N',
-        'is_replied': 'N'
+        'is_replied': 'N',
+        'doctor_comment': None,
     }), 200
 
 # ✅ 4. 의사 응답
 @consult_bp.route('/reply', methods=['POST'])
+@jwt_required()
 def doctor_reply():
-    data = request.json
-    request_id = data.get('request_id')
-    doctor_id = data.get('doctor_id')
-    comment = data.get('comment')
-    reply_datetime = data.get('reply_datetime')
+    try:
+        identity = get_jwt_identity()  # 토큰의 register_id (설정에 맞게)
+        data = request.get_json() or {}
+        request_id = data.get('request_id')
+        comment = data.get('comment', '')
+        reply_dt_str = data.get('reply_datetime')
 
-    doctor = Doctor.query.filter_by(register_id=doctor_id).first()
-    if not doctor:
-        return jsonify({'error': 'Invalid doctor_id'}), 400
+        if not request_id:
+            return jsonify({'error': 'request_id required'}), 400
 
-    consult = ConsultRequest.query.get(request_id)
-    if consult and consult.is_requested == 'Y':
-        consult.doctor_id = doctor_id
+        # 토큰의 주체가 실제 Doctor인지 확인
+        doctor = Doctor.query.filter_by(register_id=identity).first()
+        if not doctor:
+            return jsonify({'error': 'Invalid doctor (token)'}), 401
+
+        # 날짜 파싱 (없으면 서버 시간이 기본)
+        try:
+            reply_dt = datetime.strptime(reply_dt_str[:14], '%Y%m%d%H%M%S') if reply_dt_str else datetime.utcnow()
+        except Exception:
+            reply_dt = datetime.utcnow()
+
+        consult = ConsultRequest.query.get(request_id)
+        if not consult or consult.is_requested != 'Y':
+            return jsonify({'error': 'Request not found or not active'}), 400
+
+        consult.doctor_id = doctor.register_id
         consult.doctor_comment = comment
-        consult.reply_datetime = reply_datetime
+        consult.reply_datetime = reply_dt
         consult.is_replied = 'Y'
+
         db.session.commit()
-        return jsonify({'message': 'Reply submitted'}), 200
-
-    return jsonify({'error': 'Request not found or already completed'}), 400
-
+        return jsonify({'message': 'Reply submitted', 'request_id': consult.id}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
 
 # ✅ 5. 통계 조회
 @consult_bp.route('/stats', methods=['GET'])
@@ -155,7 +228,6 @@ def consult_stats():
     except Exception as e:
         return jsonify({'error': str(e)}), 400
 
-
 # ✅ 6. 진료 신청 리스트 조회
 @consult_bp.route('/list', methods=['GET'])
 def list_consult_requests():
@@ -166,8 +238,8 @@ def list_consult_requests():
 
         consults = ConsultRequest.query.filter(
             ConsultRequest.is_requested == 'Y',
-            ConsultRequest.request_datetime >= start, #오늘만이 아닌 기존 날짱에서도 처리안된걸 확인하려면 주석처리
-            ConsultRequest.request_datetime <= end #오늘만이 아닌 기존 날짱에서도 처리안된걸 확인하려면 주석처리
+            # ConsultRequest.request_datetime >= start, # 오늘만이 아닌 기존 날짜도 포함하려면 주석처리
+            # ConsultRequest.request_datetime <= end # 오늘만이 아닌 기존 날짜도 포함하려면 주석처리
         ).order_by(ConsultRequest.request_datetime.desc()).all()
 
         result = []
@@ -187,7 +259,6 @@ def list_consult_requests():
     except Exception as e:
         return jsonify({'error': 'Failed to fetch consult list'}), 500
 
-
 # ✅ 7. 사용자 진행 중 진료 조회
 @consult_bp.route('/active', methods=['GET'])
 @jwt_required()
@@ -201,7 +272,7 @@ def get_active_consult_request():
         }), 200
     return jsonify({'image_path': None, 'request_id': None}), 200
 
-# ✅ 7. 오늘 날짜 기준 요청 수 반환
+# ✅ 8. 오늘 날짜 기준 요청 수 반환
 @consult_bp.route('/today-count', methods=['GET'])
 def today_request_count():
     try:
@@ -218,7 +289,7 @@ def today_request_count():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# ✅ 오늘 날짜 기준 상태별 요청 수 반환
+# ✅ 9. 오늘 날짜 기준 상태별 요청 수 반환
 @consult_bp.route('/today-status-counts', methods=['GET'])
 def today_status_counts():
     try:
@@ -261,7 +332,7 @@ def today_status_counts():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# ✅ 최근 7일 신청 건수 API
+# ✅ 10. 최근 7일 신청 건수 API
 @consult_bp.route('/recent-7-days', methods=['GET'])
 def recent_7_days():
     try:
@@ -286,4 +357,253 @@ def recent_7_days():
 
         return jsonify({'data': results}), 200
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ✅ 11. 성별·연령대 통계 (신청 이력이 있는 사용자만 대상)
+@consult_bp.route('/demographics', methods=['GET'])
+def consult_demographics():
+    """
+    응답:
+    {
+      "ok": true,
+      "data": {
+        "gender": {"male": 5, "female": 3},
+        "age": {"20대": 2, "30대": 4, "40대": 1, "50대": 1}
+      }
+    }
+    """
+    try:
+        # 신청 테이블에 등장한 user_id(=user.register_id)만 추출
+        subq = (
+            db.session.query(ConsultRequest.user_id)
+            .filter(ConsultRequest.is_requested == 'Y')  # 필요에 따라 조건 조정
+            .distinct()
+            .subquery()
+        )
+
+        # user 테이블 조인으로 gender, birth 확보
+        rows = (
+            db.session.query(User.register_id, User.gender, User.birth)
+            .join(subq, subq.c.user_id == User.register_id)
+            .all()
+        )
+
+        # ----- 성별 집계 -----
+        gender_counts = {"male": 0, "female": 0}
+        for _, g, _ in rows:
+            if g in ('M', '남', 'm', 'Male', 'male'):
+                gender_counts["male"] += 1
+            elif g in ('F', '여', 'f', 'Female', 'female'):
+                gender_counts["female"] += 1
+
+        # ----- 연령대 집계 -----
+        age_buckets = {"20대": 0, "30대": 0, "40대": 0, "50대": 0}
+        for _, _, birth in rows:
+            age = _birth_to_age(birth)
+            if age is None:
+                continue
+            if 20 <= age < 30:
+                age_buckets["20대"] += 1
+            elif 30 <= age < 40:
+                age_buckets["30대"] += 1
+            elif 40 <= age < 50:
+                age_buckets["40대"] += 1
+            elif 50 <= age < 60:
+                age_buckets["50대"] += 1
+            # 10대/60대+ 등은 현재 UI 요구사항에 없으면 생략
+
+        return jsonify({"ok": True, "data": {"gender": gender_counts, "age": age_buckets}}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+# ✅ 12. 시간대별 건수 (기본: 오늘)
+# GET /consult/hourly-stats?date=20250818
+# 응답: { ok: true, data: { labels:["00",..,"23"], counts:[..], total: N } }
+@consult_bp.route('/hourly-stats', methods=['GET'])
+def hourly_stats():
+    try:
+        date_str = request.args.get('date')    # 'YYYYMMDD' 또는 'YYYY-MM-DD'
+        the_day = _parse_ymd(date_str) or datetime.now().date()
+
+        start = datetime.combine(the_day, datetime.min.time())
+        end   = datetime.combine(the_day, datetime.max.time())
+
+        # MySQL: HOUR(datetime)으로 그룹핑
+        rows = (
+            db.session.query(
+                func.hour(ConsultRequest.request_datetime).label('hh'),
+                func.count(ConsultRequest.id)
+            )
+            .filter(
+                ConsultRequest.request_datetime >= start,
+                ConsultRequest.request_datetime <= end
+            )
+            .group_by('hh')
+            .all()
+        )
+
+        # 0~23까지 채우기
+        by_hour = {int(h): int(c) for h, c in rows}
+        labels = [f'{h:02d}' for h in range(24)]
+        counts = [by_hour.get(h, 0) for h in range(24)]
+        total = sum(counts)
+
+        return jsonify({
+            'ok': True,
+            'data': {
+                'labels': labels,
+                'counts': counts,
+                'total': total,
+            }
+        }), 200
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+# ✅ 13. 날짜 기준 사진(원본 이미지) 리스트
+# GET /consult/images?date=2025-08-18&limit=12&offset=0
+# 응답: { ok:true, data:[{id,user_id,image_path,image_url,request_datetime,is_replied}], total:N }
+@consult_bp.route('/images', methods=['GET'])
+def images_by_date():
+    try:
+        date_str = request.args.get('date')
+        the_day = _parse_ymd(date_str) or datetime.now().date()
+
+        limit = max(1, min(int(request.args.get('limit', 12)), 200))
+        offset = max(0, int(request.args.get('offset', 0)))
+
+        start = datetime.combine(the_day, datetime.min.time())
+        end   = datetime.combine(the_day, datetime.max.time())
+
+        base = (
+            ConsultRequest.query
+            .filter(
+                ConsultRequest.request_datetime >= start,
+                ConsultRequest.request_datetime <= end,
+                ConsultRequest.is_requested == 'Y'
+            )
+            .order_by(ConsultRequest.request_datetime.desc())
+        )
+
+        total = base.count()
+        rows = base.limit(limit).offset(offset).all()
+
+        host = (current_app.config.get('INTERNAL_BASE_URL') or '').rstrip('/')
+        data = []
+        for r in rows:
+            # image_path가 '/images/...' 형태라면 접두사만 붙여 완전한 URL 생성
+            path = r.image_path or ''
+            image_url = f'{host}{path}' if path.startswith('/') else f'{host}/{path}'
+            dt_str = (
+                r.request_datetime.strftime('%Y-%m-%d %H:%M:%S')
+                if isinstance(r.request_datetime, datetime) else str(r.request_datetime)
+            )
+            data.append({
+                'id': r.id,
+                'user_id': r.user_id,
+                'image_path': path,
+                'image_url': image_url,
+                'request_datetime': dt_str,
+                'is_replied': r.is_replied,
+            })
+
+        return jsonify({'ok': True, 'data': data, 'total': total}), 200
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+# ✅ 14. 영상 타입 비율 (MySQL ↔ Mongo 매칭)
+# GET /consult/video-type-ratio?date=2025-08-18
+# 응답: { ok:true, data:{ "X-ray": n1, "구강이미지": n2 }, total: n1+n2 }
+@consult_bp.route('/video-type-ratio', methods=['GET'])
+def video_type_ratio():
+    try:
+        date_str = request.args.get('date')
+        the_day = _parse_ymd(date_str) or datetime.now().date()
+
+        start = datetime.combine(the_day, datetime.min.time())
+        end   = datetime.combine(the_day, datetime.max.time())
+
+        rows = (
+            db.session.query(ConsultRequest.user_id, ConsultRequest.image_path)
+            .filter(
+                ConsultRequest.request_datetime >= start,
+                ConsultRequest.request_datetime <= end,
+                ConsultRequest.is_requested == 'Y'
+            )
+            .all()
+        )
+
+        # ✅ user_id는 무조건 문자열로, path도 문자열로 확보
+        pairs = {(str(uid), str(path or '')) for uid, path in rows if path}
+
+        coll = _get_mongo_collection()
+
+        def _norm_type(val):
+            if not val: return None
+            s = str(val).strip().lower()
+            if s in ('xray', 'x-ray'): return 'xray'
+            if s == 'normal': return 'normal'
+            return None
+
+        xray_count = 0
+        normal_count = 0
+
+        for uid_str, img_path in pairs:
+            norm_path = _normalize_path(img_path)            # '/images/.../a.png'
+            alt_path1 = '/' + norm_path.lstrip('/')          # 혹시 몰라 보정
+            base_name = os.path.basename(norm_path)          # 'a.png'
+
+            # ✅ user_id는 문자열로 비교
+            doc = (
+                coll.find_one({"user_id": uid_str, "original_image_path": norm_path}) or
+                coll.find_one({"user_id": uid_str, "original_image_path": alt_path1}) or
+                coll.find_one({"user_id": uid_str, "original_image_path": base_name})
+            )
+
+            if not doc:
+                # 문서를 못 찾으면 스킵 (임의로 normal 올리지 않음)
+                continue
+
+            image_type = None
+            if isinstance(doc.get('image_type'), str):
+                image_type = doc['image_type']
+            elif isinstance(doc.get('metadata'), dict) and isinstance(doc['metadata'].get('image_type'), str):
+                image_type = doc['metadata']['image_type']
+
+            t = _norm_type(image_type)
+            if t == 'xray':
+                xray_count += 1
+            elif t == 'normal':
+                normal_count += 1
+            else:
+                continue
+
+        data = {"X-ray": xray_count, "구강이미지": normal_count}
+        return jsonify({"ok": True, "data": data, "total": xray_count + normal_count}), 200
+
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+    
+# ✅ 15. 기록 삭제
+@consult_bp.route('/delete', methods=['POST'])
+@jwt_required()
+def delete_consult():
+    try:
+        data = request.get_json()
+        request_id = data.get('request_id')
+
+        if not request_id:
+            return jsonify({'error': 'request_id required'}), 400
+
+        consult = ConsultRequest.query.get(request_id)
+        if consult:
+            db.session.delete(consult)
+            db.session.commit()
+            return jsonify({'message': f'Request {request_id} deleted successfully'}), 200
+        else:
+            return jsonify({'error': 'Request not found'}), 404
+            
+    except Exception as e:
+        db.session.rollback()
         return jsonify({'error': str(e)}), 500

@@ -1,3 +1,4 @@
+# /home/elicer/jonghyuk/toothai_backend_A100/routes/chatbot_routes.py
 from flask import Blueprint, request, jsonify, current_app as app
 from pymongo.errors import ConnectionFailure
 import time
@@ -6,7 +7,7 @@ import os
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from config import DevelopmentConfig
 
-# ✅ 챗봇 전용 로거 분리
+# 챗봇 전용 로거 분리
 chatbot_logger = logging.getLogger("chatbot_logger")
 chatbot_logger.setLevel(logging.INFO)
 
@@ -22,17 +23,22 @@ if not chatbot_logger.handlers:
 
 chatbot_bp = Blueprint('chatbot', __name__)
 
-# ✅ 이미지 관련 요청 판단 함수
+# 이미지 관련 요청 판단 함수
 def wants_image(user_message: str) -> bool:
     keywords = ["사진", "이미지", "보여", "그려", "그림", "사진 보여", "보여줘", "보여줄 수"]
     return any(kw in user_message for kw in keywords)
+    
+# 진료기록 관련 요청 판단 함수
+def is_medical_record_query(user_message: str) -> bool:
+    keywords = ["사진", "기록", "진단", "결과", "분석", "내역", "이전", "히스토리", "검사"]
+    return any(kw in user_message for kw in keywords)
 
 @chatbot_bp.route('/chatbot', methods=['POST'])
-@jwt_required()  # ✅ 추가
+@jwt_required()
 def chatbot_reply():
     start_time = time.time()
     user_message = "알 수 없는 메시지"
-    patient_id = get_jwt_identity()  # ✅ JWT에서 추출
+    patient_id = get_jwt_identity()
 
     try:
         data = request.json
@@ -90,31 +96,55 @@ def chatbot_reply():
             }), 500
 
         chat = gemini_model.start_chat()
+        
+        # 진료기록 관련 질문인지 판단하여 프롬프트 분기
+        if is_medical_record_query(user_message):
+            prompt = f"""
+            환자 ID '{query_patient_id}'는 지금까지 총 {diagnosis_count}건의 사진 진단 기록이 있습니다.
+            
+            {record_summary}
+            
+            사용자 질문:
+            "{user_message}"
+            
+            위 내용을 참고하여 의료 기록 기반으로 정확하고 친절하게 답변해주세요.
+            """
+        else:
+            # 일반적인 질문일 경우, 진료 기록 정보를 제외
+            prompt = f"""
+            사용자 질문:
+            "{user_message}"
+            
+            친절하고 명확하게 답변해주세요.
+            """
 
-        prompt = f"""
-        환자 ID '{query_patient_id}'는 지금까지 총 {diagnosis_count}건의 사진 진단 기록이 있습니다.
+        app.logger.info(f"[🤖 Gemini 요청] 프롬프트:\n{prompt}")
+        print(f"[🤖 Gemini 요청] 프롬프트:\n{prompt}")
 
-        {record_summary}
-
-        사용자 질문:
-        "{user_message}"
-
-        위 내용을 참고하여 의료 기록 기반으로 정확하고 친절하게 답변해주세요.
-        """
-        app.logger.info(f"[🤖 Gemini 요청] 프롬프트 일부:\n{prompt[:500]}...")
-        print(f"[🤖 Gemini 요청] 프롬프트 일부:\n{prompt[:500]}...")
-
+        reply = ""
         try:
-            response = chat.send_message(prompt)
+            # Gemini API 호출에 타임아웃 적용 (예: 30초)
+            response = chat.send_message(prompt, request_options={'timeout': 30})
             reply = response.text
-            app.logger.info(f"[✅ Gemini 응답] 길이: {len(reply)}자 / 내용:\n{reply[:500]}...")
-            print(f"[✅ Gemini 응답] 길이: {len(reply)}자 / 내용:\n{reply[:500]}...")
+            
+            # ✅ 수정: 진료기록 관련 질문일 경우에만 면책 문구 추가
+            if is_medical_record_query(user_message):
+                disclaimer = "\n\n⚠️ **주의:** 이 답변은 인공지능 기반의 자동 분석 결과이며, 의학적 소견을 대체할 수 없습니다. 정확한 진단 및 치료는 반드시 전문의와 상담하시기 바랍니다."
+                reply += disclaimer
+            
+            app.logger.info(f"[✅ Gemini 응답] 길이: {len(reply)}자 / 내용:\n{reply}")
+            print(f"[✅ Gemini 응답] 길이: {len(reply)}자 / 내용:\n{reply}")
         except Exception as e:
-            app.logger.error(f"[❌ Gemini 오류] 응답 생성 실패: {e}")
+            app.logger.error(f"[❌ Gemini 오류] 응답 생성 실패: {e}", exc_info=True)
             print(f"[❌ Gemini 오류] 응답 생성 실패: {e}")
             reply = "AI 응답 생성 중 오류가 발생했습니다. 다시 시도해 주세요."
 
-        # ✅ 이미지 조건부 반환
+            # ✅ 오류 시에도 진료기록 관련 질문일 경우에만 면책 문구 추가
+            if is_medical_record_query(user_message):
+                disclaimer = "\n\n⚠️ **주의:** 이 답변은 인공지능 기반의 자동 분석 결과이며, 의학적 소견을 대체할 수 없습니다. 정확한 진단 및 치료는 반드시 전문의와 상담하시기 바랍니다."
+                reply += disclaimer
+
+        # 이미지 조건부 반환
         image_urls = {}
 
         if diagnosis_count > 0 and wants_image(user_message):
@@ -156,7 +186,6 @@ def chatbot_reply():
                         k: to_url(selected_record.get(f"{k}_image_path"))
                         for k in ["original", "model1", "model2", "model3"]
                     }
-
                 image_urls = {k: v for k, v in image_urls.items() if v}
 
         elapsed_time = int((time.time() - start_time) * 1000)

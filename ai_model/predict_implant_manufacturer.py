@@ -3,10 +3,10 @@ import sys
 import torch
 import torch.nn.functional as F
 from torchvision import transforms
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import timm
 import ttach as tta
-from ai_model.xray_detector import detect_xray  # YOLO 탐지 결과 사용
+from ai_model.xray_detector import detect_xray  # YOLO 탐지 결과 사용 (박스 정보만 활용)
 
 # 클래스 수
 NUM_CLASSES = 42
@@ -55,36 +55,78 @@ def predict_crop_image(image: Image.Image):
 
 def classify_implants_from_xray(xray_image_path: str):
     try:
-        result = detect_xray(xray_image_path)
-        image = Image.open(xray_image_path).convert("RGB")
+        # detect_xray를 호출하여 임플란트 박스 정보를 얻습니다.
+        # 이 단계에서 생성되는 이미지는 사용하지 않습니다.
+        result_from_detector = detect_xray(xray_image_path) 
+        
+        # 임플란트 분류 이미지를 그릴 베이스로 원본 X-ray 이미지를 로드합니다.
+        image = Image.open(xray_image_path).convert("RGB") 
     except Exception as e:
         print(f"❌ 오류: {e}")
-        return []
+        return [], None # 빈 리스트와 None을 반환
 
     predictions = []
+    
+    # 임플란트 박스와 클래스 번호를 그릴 Image 객체 (원본 이미지를 복사하여 사용)
+    implant_overlay_image = image.copy() 
+    draw = ImageDraw.Draw(implant_overlay_image)
 
-    for obj in result['detections']:
+    # 폰트 설정 (흰색 배경에 잘 보이도록 검은색 폰트 사용)
+    try:
+        # NanumGothicBold 폰트 경로를 사용합니다.
+        font = ImageFont.truetype("/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf", 20)
+    except IOError:
+        font = ImageFont.load_default() # 폰트 로드 실패 시 기본 폰트 사용
+
+    for obj in result_from_detector['detections']: # xray_detector의 탐지 결과 사용
         if obj['class_name'] != IMPLANT_CLASS_NAME:
             continue
 
         x1, y1, x2, y2 = map(int, obj['bbox'])
-        cropped = image.crop((x1, y1, x2, y2))
+        cropped = image.crop((x1, y1, x2, y2)) # 원본 이미지에서 크롭
 
         try:
             pred_class, confidence = predict_crop_image(cropped)
         except Exception as e:
-            print(f"❌ 예측 실패: {e}")
+            print(f"❌ 임플란트 예측 실패: {e}")
             continue
+
+        # ✅ 박스 위에 클래스 번호만 그리기 (검은색 글씨)
+        label_text = str(pred_class) # 클래스 번호만
+        
+        # 텍스트 크기를 얻어 텍스트 박스 위치 계산
+        # draw.textbbox((x, y), text, font)는 폰트에 따라 텍스트의 바운딩 박스를 반환합니다.
+        # y1 - 22는 텍스트가 박스 위에 위치하도록 조정하는 예시이며, 폰트 크기에 따라 조정 필요
+        text_bbox = draw.textbbox((x1, y1 - 22), label_text, font=font) 
+        text_width = text_bbox[2] - text_bbox[0]
+        text_height = text_bbox[3] - text_bbox[1]
+
+        # 텍스트 배경 (박스 위에 라벨이 잘 보이도록)
+        # 텍스트가 시작되는 x1, y1-22에서 텍스트의 폭과 높이를 고려하여 배경 박스를 그립니다.
+        text_bg_x1 = x1
+        text_bg_y1 = y1 - text_height - 5 # 텍스트가 박스 바로 위에 위치하도록 y 좌표 조정
+        text_bg_x2 = x1 + text_width + 5
+        text_bg_y2 = y1 - 5 # 텍스트 박스 아래쪽 y 좌표 조정
+        
+        # 임플란트 박스 자체는 빨간색 유지, 텍스트 배경은 노란색, 글씨는 검은색
+        draw.rectangle([x1, y1, x2, y2], outline="red", width=2) # 임플란트 박스 (빨간색)
+        draw.rectangle([text_bg_x1, text_bg_y1, text_bg_x2, text_bg_y2], fill="yellow") # 텍스트 배경 (노란색)
+        draw.text((text_bg_x1 + 2, text_bg_y1), label_text, font=font, fill=(0, 0, 0)) # 텍스트 (검은색)
 
         predictions.append({
             "original_image": xray_image_path,
             "bbox": [x1, y1, x2, y2],
             "predicted_manufacturer_class": pred_class,
-            "predicted_manufacturer_name": MANUFACTURER_MAP.get(pred_class, f"{pred_class}번"),
+            "predicted_manufacturer_name": MANUFACTURER_MAP.get(pred_class, f"{pred_class}번 알 수 없음"),
             "confidence": round(confidence, 3)
         })
+    
+    # 임플란트 박스와 클래스 번호가 그려진 이미지를 반환 (경로와 Image 객체 모두)
+    # 임플란트 전용 이미지 저장 경로
+    implant_output_path = xray_image_path.replace(".png", "_implant_classified.png").replace(".jpg", "_implant_classified.jpg")
+    implant_overlay_image.save(implant_output_path)
 
-    return predictions
+    return predictions, implant_output_path # 예측 결과와 새로운 이미지 경로를 튜플로 반환
 
 # ✅ CLI 실행
 if __name__ == "__main__":
@@ -98,7 +140,7 @@ if __name__ == "__main__":
         print(f"❌ 파일이 존재하지 않습니다: {test_image_path}")
         sys.exit(1)
 
-    results = classify_implants_from_xray(test_image_path)
+    results, output_image_path = classify_implants_from_xray(test_image_path) # 결과와 이미지 경로를 받음
 
     if not results:
         print("🔍 감지된 임플란트 없음")
@@ -106,3 +148,4 @@ if __name__ == "__main__":
         print("📦 예측 결과:")
         for r in results:
             print(r)
+        print(f"🎨 결과 이미지가 저장되었습니다: {output_image_path}") # 저장된 이미지 경로 출력

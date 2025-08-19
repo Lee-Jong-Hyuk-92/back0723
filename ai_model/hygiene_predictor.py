@@ -13,28 +13,28 @@ model = YOLO(MODEL_PATH)
 
 # 클래스 ID → 이름 매핑
 YOLO_CLASS_MAP = {
-    0: "교정장치 (ortho)",
-    1: "골드 (gcr)",
-    2: "메탈크라운 (mcr)",
-    3: "세라믹 (cecr)",
-    4: "아말감 (am)",
-    5: "지르코니아 (zircr)",
-    6: "치석 단계1 (tar1)",
-    7: "치석 단계2 (tar2)",
-    8: "치석 단계3 (tar3)"    
+    0: "교정장치",
+    1: "금니 (골드 크라운)",
+    2: "은니 (메탈 크라운)",
+    3: "도자기소재 치아 덮개(세라믹 크라운)",
+    4: "아말감 충전재",
+    5: "도자기소재 치아 덮개(지르코니아 크라운)",
+    6: "치석 1 단계",
+    7: "치석 2 단계",
+    8: "치석 3 단계"
 }
 
 # 시각화 색상 (RGBA)
 PALETTE = {
-    0: (220, 20, 60, 200),
-    1: (138, 43, 226, 200),
-    2: (255, 215, 0, 200),
-    3: (245, 245, 245, 200),
-    4: (30, 30, 30, 200),
-    5: (0, 255, 0, 200),
-    6: (255, 140, 0, 200),
-    7: (0, 0, 255, 200),
-    8: (139, 69, 19, 200)
+    0: (138,  43, 226, 200),  # 교정장치: 보라
+    1: (192, 192, 192, 200),  # 금니 (골드 크라운): 실버/회색
+    2: (255, 215,   0, 200),  # 은니 (메탈 크라운): 골드
+    3: (  0,   0,   0, 200),  # 도자기소재 치아 덮개(세라믹 크라운): 검정
+    4: (  0,   0, 255, 200),  # 아말감 충전재: 파랑
+    5: (  0, 255,   0, 200),  # 도자기소재 치아 덮개(지르코니아 크라운): 초록
+    6: (255, 255,   0, 200),  # 치석 1 단계: 노랑
+    7: (255, 165,   0, 200),  # 치석 2 단계: 주황
+    8: (255,   0,   0, 200),  # 치석 3 단계: 빨강
 }
 
 def _prepare_image_for_yolo(pil_img: Image.Image, imgsz=640):
@@ -50,8 +50,8 @@ def predict_mask_and_overlay_with_all(pil_img: Image.Image, overlay_save_path: s
     """
     마스크 오버레이 이미지를 생성 및 저장하고,
     탐지된 모든 클래스 이름 배열과 기타 정보 반환.
+    → 수정: 투명 배경 + 마스크만 저장
     """
-
     orig_w, orig_h = pil_img.size
     img_np = np.array(pil_img.convert("RGB"))
 
@@ -64,9 +64,9 @@ def predict_mask_and_overlay_with_all(pil_img: Image.Image, overlay_save_path: s
     results = model(img_tensor, verbose=False)
     r = results[0]
 
-    # 탐지 없으면 원본 저장 후 반환
+    # 탐지 없으면 완전 투명 PNG 저장
     if r.masks is None or len(r.boxes.cls) == 0:
-        pil_img.save(overlay_save_path)
+        Image.new("RGBA", (orig_w, orig_h), (0, 0, 0, 0)).save(overlay_save_path, format="PNG")
         return pil_img, [], 0.0, os.path.basename(MODEL_PATH), "감지되지 않음", []
 
     # 마스크 크기 원본으로 복원
@@ -75,19 +75,21 @@ def predict_mask_and_overlay_with_all(pil_img: Image.Image, overlay_save_path: s
         masks_data = masks_data[:, None, :, :]
     r.masks.data = scale_masks(masks_data, (orig_h, orig_w))
 
-    # 오버레이 생성
-    overlay_img = pil_img.convert("RGBA")
+    # 투명 배경에서 시작
+    overlay_img = Image.new("RGBA", (orig_w, orig_h), (0, 0, 0, 0))
 
+    # 마스크별 색상 적용
     for seg, cls_t in zip(r.masks.data.squeeze(1), r.boxes.cls):
         cls_id = int(cls_t.item())
         color = PALETTE.get(cls_id, (255, 255, 255, 128))
         mask = seg.cpu().numpy()
         mask_img = Image.fromarray((mask * 255).astype(np.uint8))
         color_layer = Image.new("RGBA", (orig_w, orig_h), color)
-        overlay_img = Image.alpha_composite(
-            overlay_img,
-            Image.composite(color_layer, Image.new("RGBA", (orig_w, orig_h)), mask_img)
-        )
+        colored = Image.composite(color_layer, Image.new("RGBA", (orig_w, orig_h), (0, 0, 0, 0)), mask_img)
+        overlay_img = Image.alpha_composite(overlay_img, colored)
+
+    # 투명 PNG로 저장
+    overlay_img.save(overlay_save_path, format="PNG")
 
     # 클래스명 리스트
     detected_classes = r.boxes.cls.tolist()
@@ -106,10 +108,7 @@ def predict_mask_and_overlay_with_all(pil_img: Image.Image, overlay_save_path: s
     # 대표 클래스명 (첫번째)
     main_label = detected_class_names[0] if detected_class_names else "감지되지 않음"
 
-    # 오버레이 이미지 저장
-    overlay_img.convert("RGB").save(overlay_save_path)
-
-    return overlay_img.convert("RGB"), box_centers, avg_confidence, os.path.basename(MODEL_PATH), main_label, detected_class_names
+    return overlay_img, box_centers, avg_confidence, os.path.basename(MODEL_PATH), main_label, detected_class_names
 
 # 모든 디텍션과 confidence 리스트 반환
 def get_all_classes_and_confidences(pil_img: Image.Image):
