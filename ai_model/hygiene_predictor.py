@@ -26,7 +26,6 @@ YOLO_CLASS_MAP: Dict[int, str] = {
 }
 
 # ── 시각화 색상 (RGBA) ─────────────────────────────────────────────────────────
-# 1: 골드, 2: 실버 (주석/색상 일치)
 PALETTE: Dict[int, tuple] = {
     0: (138, 43, 226, 200),   # 교정장치: 보라
     1: (255, 215, 0, 200),    # 금니 (골드 크라운): 골드
@@ -47,25 +46,16 @@ def _prepare_image_for_yolo(pil_img: Image.Image, imgsz: int = 640):
     img_lb = lb(image=img_np)
     return img_lb, lb
 
-
 def predict_mask_and_overlay_with_all(
     pil_img: Image.Image,
     overlay_save_path: str
 ) -> Tuple[
-    Image.Image,                 # overlay_img
-    List[List[int]],             # box_centers [[cx,cy], ...]
-    float,                       # avg_confidence
-    str,                         # used_model (filename)
-    str,                         # main_label
-    List[str],                   # detected_class_names (라벨명 리스트)
-    List[Dict[str, object]]      # detections [{class_id,label,confidence,bbox}, ...]
+    Image.Image,
+    List[Dict],
+    float,
+    str,
+    str,
 ]:
-    """
-    투명 배경 오버레이 PNG 생성/저장 + 모든 디텍션 정보 반환.
-    - bbox는 [x1, y1, x2, y2] float
-    - avg_confidence는 전체 박스 conf 평균
-    - main_label은 첫 번째 디텍션 라벨
-    """
     orig_w, orig_h = pil_img.size
     img_np = np.array(pil_img.convert("RGB"))
 
@@ -82,23 +72,22 @@ def predict_mask_and_overlay_with_all(
     if r.masks is None or len(r.boxes.cls) == 0:
         empty = Image.new("RGBA", (orig_w, orig_h), (0, 0, 0, 0))
         empty.save(overlay_save_path, format="PNG")
-        return empty, [], 0.0, os.path.basename(MODEL_PATH), "감지되지 않음", [], []
+        return empty, [], 0.0, os.path.basename(MODEL_PATH), "감지되지 않음"
 
-    # 마스크 크기 원본으로 복원 (형태 호환: (N,H,W) 또는 (N,1,H,W))
+    # 마스크 크기 원본으로 복원
     masks_data = r.masks.data
     if masks_data.ndim == 3:
         masks_data = masks_data[:, None, :, :]
     elif masks_data.ndim == 4 and masks_data.shape[1] != 1:
-        # 채널 차원이 1이 아니면 1개로 줄임
         masks_data = masks_data[:, :1, :, :]
 
-    r.masks.data = scale_masks(masks_data, (orig_h, orig_w))  # -> (N,1,H,W)
-    masks_scaled = r.masks.data.squeeze(1)                    # -> (N,H,W)
+    r.masks.data = scale_masks(masks_data, (orig_h, orig_w))
+    masks_scaled = r.masks.data.squeeze(1)
 
     # 투명 배경에서 시작
     overlay_img = Image.new("RGBA", (orig_w, orig_h), (0, 0, 0, 0))
 
-    detections: List[Dict[str, object]] = []
+    detections: List[Dict] = []
     for seg, cls_t, conf_t, box in zip(masks_scaled, r.boxes.cls, r.boxes.conf, r.boxes.xyxy):
         cls_id = int(cls_t.item())
         color = PALETTE.get(cls_id, (255, 255, 255, 128))
@@ -117,61 +106,16 @@ def predict_mask_and_overlay_with_all(
             "label": YOLO_CLASS_MAP.get(cls_id, "Unknown"),
             "confidence": float(conf_t.item()),
             "bbox": [x1, y1, x2, y2],
+            "mask_array": mask, # 마스크 데이터 추가
         })
 
     # 투명 PNG 저장
     overlay_img.save(overlay_save_path, format="PNG")
 
-    # 클래스명 리스트
-    detected_class_names = [YOLO_CLASS_MAP.get(int(c), "Unknown") for c in r.boxes.cls.tolist()]
-
-    # 박스 중심 좌표
-    box_centers: List[List[int]] = []
-    for box in r.boxes.xyxy:
-        x1, y1, x2, y2 = box.tolist()
-        cx, cy = int((x1 + x2) / 2), int((y1 + y2) / 2)
-        box_centers.append([cx, cy])
-
     # 평균 confidence
     avg_confidence = float(r.boxes.conf.mean().item()) if r.boxes.conf is not None else 0.0
 
     # 대표 클래스명 (첫번째)
-    main_label = detected_class_names[0] if detected_class_names else "감지되지 않음"
+    main_label = detections[0]['label'] if detections else "감지되지 않음"
 
-    return overlay_img, box_centers, avg_confidence, os.path.basename(MODEL_PATH), main_label, detected_class_names, detections
-
-
-# 모든 디텍션과 confidence 리스트 반환
-def get_all_classes_and_confidences(pil_img: Image.Image):
-    img_lb, _ = _prepare_image_for_yolo(pil_img)
-    results = model.predict(img_lb, verbose=False)
-    r = results[0]
-
-    classes_detected = []
-    if r.boxes is None or len(r.boxes.cls) == 0:
-        return classes_detected
-
-    for cls_id, conf in zip(r.boxes.cls.tolist(), r.boxes.conf.tolist()):
-        label = YOLO_CLASS_MAP.get(int(cls_id), "Unknown")
-        classes_detected.append((int(cls_id), float(conf), label))
-    return classes_detected
-
-
-# 가장 신뢰도 높은 클래스 1개 반환
-def get_main_class_and_confidence_and_label(pil_img: Image.Image):
-    img_np = np.array(pil_img.convert("RGB"))
-    lb = LetterBox(new_shape=(640, 640))
-    img_lb = lb(image=img_np)
-    img_tensor = torch.from_numpy(img_lb).permute(2, 0, 1).float().unsqueeze(0) / 255.0
-
-    results = model(img_tensor, verbose=False)
-    r = results[0]
-
-    if r.boxes is None or len(r.boxes.cls) == 0:
-        return None, None, None
-
-    best_idx = r.boxes.conf.argmax().item()
-    class_id = int(r.boxes.cls[best_idx].item())
-    conf = float(r.boxes.conf[best_idx].item())
-    label = YOLO_CLASS_MAP.get(class_id, f"class_{class_id}")
-    return class_id, conf, label
+    return overlay_img, detections, avg_confidence, os.path.basename(MODEL_PATH), main_label

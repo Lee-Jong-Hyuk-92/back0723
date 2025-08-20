@@ -2,6 +2,7 @@ import os
 import numpy as np
 from PIL import Image
 from ultralytics import YOLO
+from typing import List, Dict
 
 # ✅ 설정
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -26,13 +27,12 @@ def predict_mask_and_overlay_only(pil_img, overlay_save_path):
         print("❌ 예측 결과 없음")
         return None
 
-    # YOLO 출력 이미지를 PIL로 변환 후 원본 크기로 맞춤
     overlay_img = Image.fromarray(result.plot()).resize(pil_img.size, Image.NEAREST)
     overlay_img.save(overlay_save_path, format="PNG")
     return overlay_img
 
-# ✅ 모든 클래스 ID, confidence, FDI 번호 반환
-def get_all_class_info_json(pil_img):
+# ✅ 모든 클래스 ID, confidence, FDI 번호, bbox 반환
+def get_all_class_info_json(pil_img) -> List[Dict]:
     rgb_img = np.array(pil_img.convert("RGB"))
     results = model.predict(rgb_img, conf=0.25, imgsz=640)
     result = results[0]
@@ -40,17 +40,19 @@ def get_all_class_info_json(pil_img):
     class_info_list = []
 
     if result.masks is None or len(result.boxes.cls) == 0:
-        return class_info_list  # 예측된 항목 없음
+        return class_info_list
 
     for i in range(len(result.boxes.cls)):
         class_id = int(result.boxes.cls[i].item())
         confidence = float(result.boxes.conf[i].item())
         tooth_number = FDI_CLASS_MAP.get(class_id, "Unknown")
+        bbox = result.boxes.xyxy[i].tolist()
 
         class_info_list.append({
             "class_id": class_id,
             "confidence": confidence,
-            "tooth_number_fdi": tooth_number
+            "tooth_number_fdi": tooth_number,
+            "bbox": bbox, # bbox 추가
         })
 
     return class_info_list

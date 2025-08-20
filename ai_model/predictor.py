@@ -7,6 +7,7 @@ from ultralytics.data.augment import LetterBox
 from ultralytics.utils.ops import scale_masks
 import time
 import logging
+from typing import List, Dict, Tuple
 
 # Set up logging
 predictor_logger = logging.getLogger("predictor_logger")
@@ -52,7 +53,13 @@ PALETTE = {
     8: (  0, 255,   0, 220), # 치주질환 말기  (초록)
 }
 
-def predict_overlayed_image(pil_img: Image.Image, overlay_save_path: str):
+def predict_overlayed_image(pil_img: Image.Image, overlay_save_path: str) -> Tuple[
+    Image.Image,
+    List[Dict],
+    float,
+    str,
+    str
+]:
     start_time = time.perf_counter()
     orig_w, orig_h = pil_img.size
     img_np = np.array(pil_img.convert("RGB"))
@@ -73,59 +80,48 @@ def predict_overlayed_image(pil_img: Image.Image, overlay_save_path: str):
         elapsed = int((time.perf_counter() - start_time) * 1000)
         predictor_logger.info(f"모델1 추론 (감지 없음): {elapsed}ms")
 
-        # 반환 값 구조 변경
-        return pil_img.copy(), [], 0.0, os.path.basename(MODEL_PATH), "감지되지 않음", []
+        return pil_img.copy(), [], 0.0, os.path.basename(MODEL_PATH), "감지되지 않음"
 
     # ✅ 마스크 복원
     masks_data = r.masks.data
     if masks_data.ndim == 3:
         masks_data = masks_data[:, None, :, :]
-    r.masks.data = scale_masks(masks_data, (orig_h, orig_w))
+    masks_scaled = scale_masks(masks_data, (orig_h, orig_w)).squeeze(1)
 
     # ✅ 완전 투명 배경에서 시작
     overlay_img = Image.new("RGBA", (orig_w, orig_h), (0, 0, 0, 0))
 
     # ✅ 마스크 부분만 색상 합성
-    for seg, cls_t in zip(r.masks.data.squeeze(1), r.boxes.cls):
+    detected_results = []
+    for seg, cls_t, conf_t, box in zip(masks_scaled, r.boxes.cls, r.boxes.conf, r.boxes.xyxy):
         cls_id = int(cls_t.item())
         color = PALETTE.get(cls_id, (255, 255, 255, 128))
         mask = seg.cpu().numpy()
         mask_img = Image.fromarray((mask * 255).astype(np.uint8))
+        
+        # 오버레이 이미지 생성
         color_layer = Image.new("RGBA", (orig_w, orig_h), color)
         colored = Image.composite(color_layer, Image.new("RGBA", (orig_w, orig_h), (0, 0, 0, 0)), mask_img)
         overlay_img = Image.alpha_composite(overlay_img, colored)
 
-    # ✅ overlay만 PNG로 저장
-    overlay_img.save(overlay_save_path, format="PNG")
-
-    # ✅ 클래스명/컨피던스/중심점 계산
-    detected_results = []
-    box_centers = []
-    
-    # zip을 사용하여 여러 리스트를 동시에 순회
-    for cls_t, conf_t, box in zip(r.boxes.cls, r.boxes.conf, r.boxes.xyxy):
-        cls_id = int(cls_t.item())
-        class_name = YOLO_CLASS_MAP.get(cls_id, "Unknown")
-        confidence = float(conf_t.item())
-        
+        # 디텍션 정보 저장
         detected_results.append({
-            "label": class_name,
-            "confidence": confidence
+            "label": YOLO_CLASS_MAP.get(cls_id, "Unknown"),
+            "confidence": float(conf_t.item()),
+            "mask_array": mask, # 마스크 데이터 추가
+            "bbox": box.tolist(), # 바운딩 박스 정보 추가
         })
 
-        x1, y1, x2, y2 = box.tolist()
-        cx, cy = int((x1 + x2) / 2), int((y1 + y2) / 2)
-        box_centers.append([cx, cy])
+    # ✅ overlay만 PNG로 저장
+    overlay_img.save(overlay_save_path, format="PNG")
 
     elapsed = int((time.perf_counter() - start_time) * 1000)
     predictor_logger.info(f"모델1 추론 완료: {elapsed}ms, 감지된 객체 수: {len(detected_results)}")
     
-    # ✅ 최종 반환 값 구조 변경
     return (
         overlay_img, 
-        box_centers,
-        float(r.boxes.conf.mean().item()) if r.boxes is not None else 0.0, # 평균 컨피던스 값
+        detected_results,
+        float(r.boxes.conf.mean().item()) if r.boxes is not None else 0.0,
         os.path.basename(MODEL_PATH),
         detected_results[0]['label'] if detected_results else "감지되지 않음",
-        detected_results # 변경된 딕셔너리 리스트 반환
     )
