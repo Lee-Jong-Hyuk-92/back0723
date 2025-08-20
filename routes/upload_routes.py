@@ -12,6 +12,15 @@ from ai_model import hygiene_predictor, tooth_number_predictor      # model2: �
 from models.model import MongoDBClient
 from PIL import ImageDraw, ImageFont
 
+try:
+    import torch
+    def _sync_cuda():
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+except Exception:
+    def _sync_cuda():
+        pass
+    
 upload_logger = logging.getLogger("upload_logger")
 upload_logger.setLevel(logging.INFO)
 log_dir = os.path.join(os.path.dirname(__file__), "..", "logs")
@@ -103,11 +112,14 @@ def upload_masked_image():
             from ai_model.xray_detector import detect_xray
             from ai_model.predict_implant_manufacturer import classify_implants_from_xray
 
+            # --- X-ray 탐지 시간 ---
+            detect_start = time.perf_counter()
             detect_result = detect_xray(original_path)
+            _sync_cuda()
+            detect_elapsed = int((time.perf_counter() - detect_start) * 1000)
+
             filtered_boxes = detect_result['detections']
             summary_text = detect_result.get('summary', '감지된 객체가 없습니다.')
-
-            upload_logger.info(f"[🦷 X-ray] YOLO 탐지 완료 - {len(filtered_boxes)}개 객체 (user_id={user_id})")
 
             yolo_predictions = [
                 {
@@ -118,8 +130,18 @@ def upload_masked_image():
                 } for det in filtered_boxes
             ]
 
+            # --- 임플란트 분류 시간 ---
+            impl_start = time.perf_counter()
             implant_classification_results = classify_implants_from_xray(original_path)
-            upload_logger.info(f"[🏷️ 임플란트 분류] {len(implant_classification_results)}개 결과 생성")
+            _sync_cuda()
+            impl_elapsed = int((time.perf_counter() - impl_start) * 1000)
+
+            # --- 전체 시간 ---
+            total_elapsed = int((time.perf_counter() - start_total) * 1000)
+            upload_logger.info(
+                f"[📸 추론 완료] 총 {total_elapsed}ms "
+                f"(탐지: {detect_elapsed}ms, 임플란트분류: {impl_elapsed}ms, user_id={user_id})"
+            )
 
             image_draw = image.copy()
             draw = ImageDraw.Draw(image_draw)
@@ -180,12 +202,13 @@ def upload_masked_image():
         # 일반 이미지 처리
         #upload_logger.info(f"[DEBUG] 원본 이미지 크기: {image.size}, 모드: {image.mode}")
 
-        t1 = time.perf_counter()
+        t1_start = time.perf_counter()
         processed_path_1 = os.path.join(processed_dir_1, base_name)
         masked_image_1, lesion_points, backend_model_confidence, backend_model_name, disease_label, disease_labels = predict_overlayed_image(image)
         masked_image_1.save(processed_path_1)
+        t1_elapsed = int((time.perf_counter() - t1_start) * 1000)
 
-        t2 = time.perf_counter()
+        t2_start = time.perf_counter()
         processed_path_2 = os.path.join(processed_dir_2, base_name)
         masked_image_2, detected_classes_all, hygiene_confidence, hygiene_model_name, hygiene_main_label, hygiene_detected_labels = hygiene_predictor.predict_mask_and_overlay_with_all(image, processed_path_2)
         try:
@@ -196,8 +219,9 @@ def upload_masked_image():
             upload_logger.warning(f"[DEBUG] model2 이미지 크기 확인 실패: {e}")
 
         hygiene_class_id, hygiene_conf, hygiene_label = hygiene_predictor.get_main_class_and_confidence_and_label(image)
+        t2_elapsed = int((time.perf_counter() - t2_start) * 1000)
 
-        t3 = time.perf_counter()
+        t3_start = time.perf_counter()
         processed_path_3 = os.path.join(processed_dir_3, base_name)
         tooth_number_predictor.predict_mask_and_overlay_only(image, processed_path_3)
         try:
@@ -207,9 +231,14 @@ def upload_masked_image():
         except Exception as e:
             upload_logger.warning(f"[DEBUG] model3 이미지 크기 확인 실패: {e}")
         tooth_info_list = tooth_number_predictor.get_all_class_info_json(image)
+        t3_elapsed = int((time.perf_counter() - t3_start) * 1000)
 
-        total_elapsed = time.perf_counter() - start_total
-        upload_logger.info(f"[📸 전체 추론 완료] 총 시간: {int(total_elapsed * 1000)}ms (user_id={user_id})")
+        total_elapsed = int((time.perf_counter() - start_total) * 1000)
+        upload_logger.info(
+            f"[📸 추론 완료] 총 {total_elapsed}ms "
+            f"(질병(disease): {t1_elapsed}ms, 위생(Hygiene): {t2_elapsed}ms, 치아번호(number): {t3_elapsed}ms, "
+            f"user_id={user_id})"
+        )
 
         mongo_client = MongoDBClient()
         inserted_id = mongo_client.insert_result({

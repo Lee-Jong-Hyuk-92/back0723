@@ -18,7 +18,10 @@ class DevelopmentConfig:
     # MongoDB
     MONGO_URI = os.getenv('MONGO_URI')
     MONGO_DB_NAME = os.getenv('MONGO_DB_NAME')
-
+    MONGO_COLLECTION = os.getenv('MONGO_COLLECTION', 'inference_results')  # ✅ 추가: 기본 inference_results
+    #MONGO_COLLECTION = os.getenv('MONGO_COLLECTION', 'uploads')  # ✅ 추가: 기본 uploads
+    
+    
     # 보안 키
     SECRET_KEY = os.getenv('SECRET_KEY') or 'default_fallback_key'
 
