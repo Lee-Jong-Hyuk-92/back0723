@@ -262,13 +262,24 @@ def upload_masked_image():
         except Exception as e:
             upload_logger.warning(f"[DEBUG] model3 이미지 확인 실패: {e}")
         tooth_info_list = tooth_number_predictor.get_all_class_info_json(image)
+
+        # 🦷 중복된 치아 번호 제거 (가장 높은 confidence만 유지)
+        # 키를 tooth_number_fdi로만 설정하여 동일한 치아 번호는 하나만 남김
+        unique_tooth_info = {}
+        for tooth_info in tooth_info_list:
+            tooth_number = tooth_info['tooth_number_fdi']
+            if tooth_number not in unique_tooth_info or tooth_info['confidence'] > unique_tooth_info[tooth_number]['confidence']:
+                unique_tooth_info[tooth_number] = tooth_info
+        
+        filtered_tooth_info_list = list(unique_tooth_info.values())
+        
         t3_elapsed = int((time.perf_counter() - t3_start) * 1000)
         
         final_matched_results = combine_results(
             image.size,
             disease_detections_list,
             hygiene_detections_list,
-            tooth_info_list
+            filtered_tooth_info_list # 수정된 리스트 전달
         )
 
         total_elapsed = int((time.perf_counter() - start_total) * 1000)
@@ -314,7 +325,7 @@ def upload_masked_image():
             'model3_image_path': f"/images/model3/{base_name}",
             'model3_inference_result': {
                 'message': 'model3 마스크 생성 완료',
-                'predicted_tooth_info': tooth_info_list
+                'predicted_tooth_info': filtered_tooth_info_list # 필터링된 리스트 저장
             },
             'matched_results': _convert_for_mongo(final_matched_results),
             'timestamp': datetime.now()
@@ -355,7 +366,7 @@ def upload_masked_image():
             'model3_image_path': f"/images/model3/{base_name}",
             'model3_inference_result': {
                 'message': 'model3 마스크 생성 완료',
-                'predicted_tooth_info': tooth_info_list
+                'predicted_tooth_info': filtered_tooth_info_list # 필터링된 리스트 응답
             },
             'matched_results': _convert_for_mongo(final_matched_results)
         }), 200
