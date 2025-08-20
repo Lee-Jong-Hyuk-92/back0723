@@ -12,7 +12,6 @@ from ai_model import hygiene_predictor, tooth_number_predictor
 from ai_model.combiner import combine_results
 from models.model import MongoDBClient
 
-# NumPy 배열 타입 에러 방지용 임포트
 import numpy as np
 
 try:
@@ -54,7 +53,6 @@ def _load_font(size: int = 18):
         pass
     return ImageFont.load_default()
 
-# ⚠️ 추가된 변환 함수
 def _convert_for_mongo(data):
     """MongoDB에 저장할 수 있도록 NumPy 객체를 변환합니다."""
     if isinstance(data, np.ndarray):
@@ -192,7 +190,6 @@ def upload_masked_image():
             processed_path_x2 = os.path.join(xmodel2_dir, base_name)
             image_with_manufacturer.save(processed_path_x2)
 
-            # ⚠️ MongoDB 저장 전 변환 함수 호출
             mongo_data = {
                 'user_id': user_id,
                 'image_type': image_type,
@@ -281,8 +278,18 @@ def upload_masked_image():
             f"user_id={user_id})"
         )
 
-        # ⚠️ MongoDB 저장 전 변환 함수 호출
-        mongo_data = {
+        # ⚠️ DB 저장을 위한 데이터에서 'mask_array' 필드를 제거
+        disease_detections_for_db = _convert_for_mongo([
+            {k: v for k, v in det.items() if k != 'mask_array'}
+            for det in disease_detections_list
+        ])
+        hygiene_detections_for_db = _convert_for_mongo([
+            {k: v for k, v in det.items() if k != 'mask_array'}
+            for det in hygiene_detections_list
+        ])
+        
+        mongo_client = MongoDBClient()
+        inserted_id = mongo_client.insert_result({
             'user_id': user_id,
             'image_type': image_type,
             'survey': survey_data,
@@ -294,14 +301,14 @@ def upload_masked_image():
                 'confidence': backend_model_confidence,
                 'used_model': backend_model_name,
                 'label': disease_label,
-                'detections': disease_detections_list,
+                'detections': disease_detections_for_db,
             },
             'model2_image_path': f"/images/model2/{base_name}",
             'model2_inference_result': {
                 'message': 'model2 마스크 생성 완료',
                 'confidence': hygiene_confidence,
                 'label': hygiene_main_label,
-                'detections': hygiene_detections_list,
+                'detections': hygiene_detections_for_db,
                 'used_model': hygiene_model_name
             },
             'model3_image_path': f"/images/model3/{base_name}",
@@ -309,12 +316,19 @@ def upload_masked_image():
                 'message': 'model3 마스크 생성 완료',
                 'predicted_tooth_info': tooth_info_list
             },
-            'matched_results': final_matched_results,
+            'matched_results': _convert_for_mongo(final_matched_results),
             'timestamp': datetime.now()
-        }
-        mongo_client = MongoDBClient()
-        inserted_id = mongo_client.insert_result(_convert_for_mongo(mongo_data))
+        })
 
+        # ⚠️ API 응답을 위한 데이터에서도 'mask_array' 필드를 제거
+        disease_detections_for_api = [
+            {k: v for k, v in det.items() if k != 'mask_array'}
+            for det in disease_detections_list
+        ]
+        hygiene_detections_for_api = [
+            {k: v for k, v in det.items() if k != 'mask_array'}
+            for det in hygiene_detections_list
+        ]
 
         return jsonify({
             'message': '3개 모델 처리 및 저장 완료',
@@ -328,14 +342,14 @@ def upload_masked_image():
                 'confidence': backend_model_confidence,
                 'used_model': backend_model_name,
                 'label': disease_label,
-                'detections': _convert_for_mongo(disease_detections_list), # ⚠️ 응답에도 변환 적용
+                'detections': disease_detections_for_api,
             },
             'model2_image_path': f"/images/model2/{base_name}",
             'model2_inference_result': {
                 'message': 'model2 마스크 생성 완료',
                 'confidence': hygiene_confidence,
                 'label': hygiene_main_label,
-                'detections': _convert_for_mongo(hygiene_detections_list), # ⚠️ 응답에도 변환 적용
+                'detections': hygiene_detections_for_api,
                 'used_model': hygiene_model_name
             },
             'model3_image_path': f"/images/model3/{base_name}",
@@ -343,7 +357,7 @@ def upload_masked_image():
                 'message': 'model3 마스크 생성 완료',
                 'predicted_tooth_info': tooth_info_list
             },
-            'matched_results': _convert_for_mongo(final_matched_results) # ⚠️ 응답에도 변환 적용
+            'matched_results': _convert_for_mongo(final_matched_results)
         }), 200
 
     except Exception as e:
