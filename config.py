@@ -18,12 +18,14 @@ class DevelopmentConfig:
     # MongoDB
     MONGO_URI = os.getenv('MONGO_URI')
     MONGO_DB_NAME = os.getenv('MONGO_DB_NAME')
+    # ✅ inference_results를 기본 컬렉션으로 설정 (필요시 다른 라우트에서 collection 지정 가능)
+    MONGO_COLLECTION = os.getenv('MONGO_COLLECTION', 'inference_results')
 
     # 보안 키
     SECRET_KEY = os.getenv('SECRET_KEY') or 'default_fallback_key'
 
     # ✅ 이미지 저장 경로 (images 하위로 정리)
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # ✅ 현재 파일 기준으로 고정
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # 현재 파일 기준
     IMAGE_BASE_DIR = os.path.join(BASE_DIR, 'images')
 
     UPLOAD_FOLDER_ORIGINAL = os.path.join(IMAGE_BASE_DIR, 'original')
@@ -37,4 +39,4 @@ class DevelopmentConfig:
     ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
 
     # ✅ 내부 접근용 BASE URL
-    INTERNAL_BASE_URL = os.getenv('INTERNAL_BASE_URL', 'http://localhost:5000')  # 디폴트 포함
+    INTERNAL_BASE_URL = os.getenv('INTERNAL_BASE_URL', 'http://localhost:5000')

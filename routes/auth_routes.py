@@ -269,3 +269,5 @@ def find_password():
     except Exception as e:
         db.session.rollback()
         return jsonify({'message': '비밀번호 초기화 중 오류 발생', 'error': str(e)}), 500
+    
+    

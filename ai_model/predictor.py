@@ -25,22 +25,27 @@ YOLO_CLASS_MAP = {
 
 # ✅ 색상 팔레트 (클래스별 RGBA)
 PALETTE = {
-    0: (255, 0, 0, 220),       # 🔴 빨강
-    1: (255, 255, 0, 220),     # 🟡 노랑
-    2: (255, 165, 0, 220),     # 🟠 주황
-    3: (0, 0, 255, 220),       # 🔵 파랑
-    4: (0, 128, 0, 220),       # 🟢 초록
-    5: (255, 255, 255, 220),   # ⚪ 흰색
-    6: (0, 0, 0, 220),         # ⚫ 검은색
-    7: (144, 238, 144, 220),   # 🟩 연두
-    8: (128, 0, 128, 220),     # 🟣 보라
+    0: (255, 255, 0, 220),     # 🟡 노랑 (충치 초기)
+    1: (255, 165, 0, 220),     # 🟠 주황 (충치 중기)
+    2: (255, 0, 0, 220),       # 🔴 빨강 (충치 말기)
+    3: (144, 202, 249, 220),   # #90CAF9 (잇몸 염증 초기)
+    4: ( 30, 136, 229, 220),   # #1E88E5 (잇몸 염증 중기)
+    5: ( 13,  71, 161, 220),   # #0D47A1 (잇몸 염증 말기)
+    6: (178, 255, 158, 220),   # #B2FF9E (치주질환 초기)
+    7: (102, 187, 106, 220),   # #66BB6A (치주질환 중기)
+    8: ( 27,  94,  32, 220),   # #1B5E20 (치주질환 말기)
 }
 
 def predict_overlayed_image(pil_img: Image.Image):
+    """
+    입력: PIL 이미지(원본)
+    출력: (overlay_rgba, box_centers, avg_conf, model_name, main_label, detected_labels)
+      - overlay_rgba: 원본과 동일 크기의 '투명 배경 RGBA PNG' 오버레이 (원본 위에 바로 얹어서 사용 가능)
+    """
     orig_w, orig_h = pil_img.size
     img_np = np.array(pil_img.convert("RGB"))
 
-    # ✅ CLI와 동일한 LetterBox 전처리
+    # ✅ LetterBox 전처리 (YOLO CLI와 동일)
     lb = LetterBox(new_shape=(640, 640))
     img_lb = lb(image=img_np)
     img_tensor = torch.from_numpy(img_lb).permute(2, 0, 1).float().unsqueeze(0) / 255.0
@@ -49,33 +54,29 @@ def predict_overlayed_image(pil_img: Image.Image):
     results = model(img_tensor, verbose=False)
     r = results[0]
 
-    # ✅ 탐지 없으면 원본 반환
+    # ✅ 탐지 없으면 '완전 투명 PNG' 오버레이 반환
     if r.masks is None or len(r.boxes.cls) == 0:
-        return pil_img.copy(), [], 0.0, os.path.basename(MODEL_PATH), "감지되지 않음", []
+        transparent = Image.new("RGBA", (orig_w, orig_h), (0, 0, 0, 0))
+        return transparent, [], 0.0, os.path.basename(MODEL_PATH), "감지되지 않음", []
 
-    # ✅ 마스크 복원
-    if r.masks is not None:
-        masks_data = r.masks.data
-        if masks_data.ndim == 3:  # [N, H, W] → [N, 1, H, W]
-            masks_data = masks_data[:, None, :, :]
-        r.masks.data = scale_masks(masks_data, (orig_h, orig_w))
+    # ✅ 마스크 복원 (letterbox → 원본 크기)
+    masks_data = r.masks.data
+    if masks_data.ndim == 3:  # [N,H,W] → [N,1,H,W]
+        masks_data = masks_data[:, None, :, :]
+    r.masks.data = scale_masks(masks_data, (orig_h, orig_w))
 
-    # ✅ 원본 RGBA 복사
-    overlay_img = pil_img.convert("RGBA")
+    # ✅ 완전 투명 캔버스에만 색을 칠해 오버레이 생성 (원본은 건드리지 않음)
+    overlay_rgba = Image.new("RGBA", (orig_w, orig_h), (0, 0, 0, 0))
 
-    # ✅ 각 마스크를 해당 색상으로만 반투명 덮기
     for seg, cls_t in zip(r.masks.data.squeeze(1), r.boxes.cls):
         cls_id = int(cls_t.item())
-        color = PALETTE.get(cls_id, (255, 255, 255, 128))  # 기본 흰색
-        mask = seg.cpu().numpy()
-        mask_img = Image.fromarray((mask * 255).astype(np.uint8))
+        color = PALETTE.get(cls_id, (255, 255, 255, 128))
+        mask = (seg.cpu().numpy() * 255).astype(np.uint8)      # 0~255
+        mask_img = Image.fromarray(mask, mode="L")             # 알파 마스크는 'L' 모드
         color_layer = Image.new("RGBA", (orig_w, orig_h), color)
-        overlay_img = Image.alpha_composite(
-            overlay_img,
-            Image.composite(color_layer, Image.new("RGBA", (orig_w, orig_h)), mask_img)
-        )
+        overlay_rgba.paste(color_layer, (0, 0), mask_img)      # 마스크 영역만 칠함
 
-    # ✅ 클래스명 / 박스 중심 계산
+    # ✅ 클래스/박스 정보 구성
     detected_classes = r.boxes.cls.tolist()
     detected_class_names = [YOLO_CLASS_MAP.get(int(c), "Unknown") for c in detected_classes]
 
@@ -85,11 +86,8 @@ def predict_overlayed_image(pil_img: Image.Image):
         cx, cy = int((x1 + x2) / 2), int((y1 + y2) / 2)
         box_centers.append([cx, cy])
 
-    return (
-        overlay_img.convert("RGB"),
-        box_centers,
-        float(r.boxes.conf.mean().item()) if r.boxes is not None else 0.0,
-        os.path.basename(MODEL_PATH),
-        detected_class_names[0] if detected_class_names else "감지되지 않음",
-        detected_class_names
-    )
+    avg_conf = float(r.boxes.conf.mean().item()) if r.boxes is not None else 0.0
+    main_label = detected_class_names[0] if detected_class_names else "감지되지 않음"
+
+    # ✅ RGBA(알파 유지) 그대로 반환
+    return overlay_rgba, box_centers, avg_conf, os.path.basename(MODEL_PATH), main_label, detected_class_names
